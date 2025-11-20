@@ -102,7 +102,6 @@ function AppContent() {
           style={{
             position: 'sticky',
             top: 0,
-            marginTop: 'calc(env(safe-area-inset-top) * -1)',
           }}
         >
           <div className="liquid-glass__content max-w-7xl mx-auto px-4 py-3">

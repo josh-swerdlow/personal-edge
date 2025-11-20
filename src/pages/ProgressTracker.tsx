@@ -81,10 +81,10 @@ export default function ProgressTracker() {
             </button>
             <button
               onClick={() => setShowArchiveModal(true)}
-              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition flex items-center gap-2"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lgtransition flex items-center gap-2"
             >
               <FaArchive size={16} />
-              Archive Week
+              Complete Week
             </button>
           </div>
         </div>

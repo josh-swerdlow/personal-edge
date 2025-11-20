@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Goal } from '../db/progress-tracker/types';
-import { getAppData, getWeekStartDate, updateGoal, createGoal } from '../db/progress-tracker/operations';
+import { getAppData, getWeekStartDate, updateGoal, createGoal, deleteGoal } from '../db/progress-tracker/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { DISCIPLINES, getDisciplineBadgeClasses, getDisciplineDisplay } from '../utils/disciplines';
@@ -81,8 +81,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     loadCurrentWeek();
   }, [loadCurrentWeek]);
 
-  async function loadFutureWeeks() {
-    if (!appData || futureWeeks.length > 0) return;
+  async function loadFutureWeeks(forceReload = false) {
+    if (!appData || (!forceReload && futureWeeks.length > 0)) return;
 
     setLoading(true);
     try {
@@ -124,8 +124,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     }
   }
 
-  async function loadPastWeeks() {
-    if (!appData || pastWeeks.length > 0) return;
+  async function loadPastWeeks(forceReload = false) {
+    if (!appData || (!forceReload && pastWeeks.length > 0)) return;
 
     setLoading(true);
     try {
@@ -179,13 +179,25 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     setEditingGoal(null);
     setEditText('');
     await loadCurrentWeek();
+    if (showFuture) {
+      await loadFutureWeeks(true);
+    }
+    if (showPast) {
+      await loadPastWeeks(true);
+    }
     onGoalUpdate();
   }
 
-  async function handleGoalArchive(goalId: string) {
-    if (confirm('Are you sure you want to archive this goal?')) {
-      await progressTrackerDB.goals.update(goalId, { archivedAt: Date.now() });
+  async function handleGoalDelete(goalId: string) {
+    if (confirm('Are you sure you want to delete this goal?')) {
+      await deleteGoal(goalId);
       await loadCurrentWeek();
+      if (showFuture) {
+        await loadFutureWeeks(true);
+      }
+      if (showPast) {
+        await loadPastWeeks(true);
+      }
       onGoalUpdate();
     }
   }
@@ -213,10 +225,10 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
 
     await loadCurrentWeek();
     if (showFuture) {
-      await loadFutureWeeks();
+      await loadFutureWeeks(true);
     }
     if (showPast) {
-      await loadPastWeeks();
+      await loadPastWeeks(true);
     }
     onGoalUpdate();
   }
@@ -238,7 +250,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         formatWeekDate={formatWeekDate}
         getDisciplineDisplay={getDisciplineDisplay}
         onGoalEdit={handleGoalEdit}
-        onGoalArchive={handleGoalArchive}
+        onGoalDelete={handleGoalDelete}
         editingGoal={editingGoal}
         editText={editText}
         setEditText={setEditText}
@@ -280,7 +292,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   formatWeekDate={formatWeekDate}
                   getDisciplineDisplay={getDisciplineDisplay}
                   onGoalEdit={handleGoalEdit}
-                  onGoalArchive={handleGoalArchive}
+                  onGoalDelete={handleGoalDelete}
                   editingGoal={editingGoal}
                   editText={editText}
                   setEditText={setEditText}
@@ -327,7 +339,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   formatWeekDate={formatWeekDate}
                   getDisciplineDisplay={getDisciplineDisplay}
                   onGoalEdit={handleGoalEdit}
-                  onGoalArchive={handleGoalArchive}
+                  onGoalDelete={handleGoalDelete}
                   editingGoal={editingGoal}
                   editText={editText}
                   setEditText={setEditText}
@@ -353,7 +365,7 @@ interface WeekCardProps {
   formatWeekDate: (d: string) => string;
   getDisciplineDisplay: (d: "Spins" | "Jumps" | "Edges") => string;
   onGoalEdit: (goal: Goal) => void;
-  onGoalArchive: (goalId: string) => void;
+  onGoalDelete: (goalId: string) => void;
   editingGoal: Goal | null;
   editText: string;
   setEditText: (text: string) => void;
@@ -368,7 +380,7 @@ function WeekCard({
   formatWeekDate,
   getDisciplineDisplay,
   onGoalEdit,
-  onGoalArchive,
+  onGoalDelete,
   editingGoal,
   editText,
   setEditText,
@@ -429,7 +441,7 @@ function WeekCard({
               editText={editText}
               setEditText={setEditText}
               onEdit={() => onGoalEdit(goal)}
-              onArchive={() => onGoalArchive(goal.id)}
+              onDelete={() => onGoalDelete(goal.id)}
               onSave={onSave}
               onCancel={onCancel}
             />
@@ -475,7 +487,7 @@ function WeekCard({
               editText={editText}
               setEditText={setEditText}
               onEdit={() => onGoalEdit(goal)}
-              onArchive={() => onGoalArchive(goal.id)}
+              onDelete={() => onGoalDelete(goal.id)}
               onSave={onSave}
               onCancel={onCancel}
               showDiscipline={true}
@@ -535,7 +547,7 @@ interface GoalItemProps {
   editText: string;
   setEditText: (text: string) => void;
   onEdit: () => void;
-  onArchive: () => void;
+  onDelete: () => void;
   onSave: () => void;
   onCancel: () => void;
   showDiscipline?: boolean;
@@ -547,7 +559,7 @@ function GoalItem({
   editText,
   setEditText,
   onEdit,
-  onArchive,
+  onDelete,
   onSave,
   onCancel,
   showDiscipline = false,
@@ -604,9 +616,9 @@ function GoalItem({
           <FaEdit size={14} />
         </button>
         <button
-          onClick={onArchive}
+          onClick={onDelete}
           className="p-1 text-white/70 hover:text-red-300 hover:bg-red-500/20 rounded"
-          aria-label="Archive goal"
+          aria-label="Delete goal"
         >
           <FaTrash size={14} />
         </button>
