@@ -8,7 +8,7 @@ interface TooltipProps {
 
 export default function Tooltip({ text, children, position = 'top' }: TooltipProps) {
   const [show, setShow] = useState(false);
-  const timeoutRef = useRef<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMouseEnter = () => {
     timeoutRef.current = setTimeout(() => {

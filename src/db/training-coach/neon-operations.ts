@@ -3,10 +3,28 @@
 
 import { Deck } from './types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Get API URL - always use relative URLs in production/preview (same domain), absolute for local dev
+const getApiUrl = () => {
+  // In production or preview builds (Vercel), always use relative URLs (same domain as frontend)
+  // This works because both frontend and API are deployed to the same domain
+  if (import.meta.env.PROD) {
+    return ''; // Empty string = relative URL (works for both production and preview)
+  }
+
+  // In local development, use VITE_API_URL or default to localhost
+  const envUrl = import.meta.env.VITE_API_URL;
+  const url = envUrl || 'http://localhost:3001';
+  // Remove trailing slashes to avoid double slashes
+  return url.replace(/\/+$/, '');
+};
+
+const API_URL = getApiUrl();
 
 async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${endpoint}`, {
+  // Ensure endpoint starts with / to avoid double slashes
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = API_URL ? `${API_URL}${normalizedEndpoint}` : normalizedEndpoint;
+  const response = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

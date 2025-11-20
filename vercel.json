@@ -13,9 +13,20 @@
       "destination": "/index.html"
     }
   ],
-  "functions": {
-    "api/index.ts": {
-      "runtime": "@vercel/node"
+  "headers": [
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
     }
-  }
+  ]
 }
+

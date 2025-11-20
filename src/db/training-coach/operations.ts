@@ -18,8 +18,10 @@ function generateUUID(): string {
 }
 
 // Helper to check if Neon is available (via API)
+// In production/preview builds (Vercel), API is always available on same domain (relative URLs)
+// In local development, check if VITE_API_URL is configured
 function isNeonAvailable(): boolean {
-  return !!import.meta.env.VITE_API_URL;
+  return import.meta.env.PROD || !!import.meta.env.VITE_API_URL;
 }
 
 // Helper to write to Neon and sync back to IndexedDB

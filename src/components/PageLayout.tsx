@@ -6,7 +6,7 @@ interface PageLayoutProps {
   hasSettingsBar?: boolean;
 }
 
-export default function PageLayout({ children, maxWidth = '4xl', hasSettingsBar = false }: PageLayoutProps) {
+export default function PageLayout({ children, maxWidth = '4xl' }: PageLayoutProps) {
   const maxWidthClass = {
     sm: 'max-w-sm',
     md: 'max-w-md',

@@ -34,24 +34,65 @@ vercel
 
 ### 3. Environment Variables
 
-In Vercel Dashboard → Project Settings → Environment Variables, add:
+**Option A: Add from `.env.local` using Vercel Dashboard (Easiest)**
+
+1. Open your `.env.local` file
+2. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+3. For each variable in `.env.local`, click "Add New" and enter:
+   - **Name**: The variable name (e.g., `DATABASE_URL` or `VITE_API_URL`)
+   - **Value**: The value from your `.env.local` file
+   - **Environment**: Select which environments (Production, Preview, Development)
+
+**Option B: Add using Vercel CLI (One at a time)**
+
+For each variable in your `.env.local`, run:
+
+```bash
+# Add DATABASE_URL (for backend/serverless functions)
+vercel env add DATABASE_URL
+
+# Add VITE_API_URL (for frontend build)
+vercel env add VITE_API_URL
+```
+
+The CLI will prompt you for the value and which environments to apply it to.
+
+**Option C: Use a script to automate (Advanced)**
+
+A helper script is provided to automate adding variables:
+
+```bash
+./scripts/push-env-to-vercel.sh
+```
+
+This will read your `.env.local` file and prompt you to add each variable to Vercel.
+
+**Option B: Manual Setup in Vercel Dashboard**
+
+1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+2. Add each variable manually:
 
 **For Backend (Serverless Functions):**
 - `DATABASE_URL` - Your Neon PostgreSQL connection string
   ```
   postgresql://user:password@host/database?sslmode=require
   ```
+  - Select: Production, Preview, Development (all environments)
 
 **For Frontend (Build-time):**
-- `VITE_API_URL` - Your Vercel deployment URL (will be set automatically)
+- `VITE_API_URL` - Your Vercel deployment URL
   ```
   https://your-project.vercel.app
   ```
+  - Select: Production, Preview, Development (all environments)
+  - **Note**: Set this after your first deployment with the actual Vercel URL
 
 **Important**:
 - `DATABASE_URL` is only available to serverless functions (backend)
-- `VITE_API_URL` is baked into the frontend build
+- `VITE_API_URL` is baked into the frontend build at build time
 - After first deployment, update `VITE_API_URL` to your actual Vercel URL
+- Variables starting with `VITE_` are available to the frontend
+- Other variables are only available to serverless functions
 
 ### 4. Update Frontend API URL
 
@@ -82,6 +123,11 @@ This will:
 - Start the frontend dev server
 - Run API routes as serverless functions
 - Simulate the Vercel environment
+- Automatically use environment variables from Vercel (or `.env.local` if not set in Vercel)
+
+**Note**: `vercel dev` will pull environment variables from your Vercel project. To use local `.env.local` instead, you can:
+1. Use `vercel env pull .env.local` to sync Vercel env vars to local
+2. Or just run your normal dev server: `npm run dev` and `npm run server`
 
 ## Troubleshooting
 

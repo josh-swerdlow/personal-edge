@@ -24,7 +24,7 @@ async function loadEnv() {
 
 await loadEnv();
 
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { neon } from '@neondatabase/serverless';
 import { Deck } from '../src/db/training-coach/types';
@@ -42,7 +42,7 @@ if (!databaseUrl) {
 const sql = neon(databaseUrl);
 
 // Get all decks
-app.get('/api/decks', async (req, res) => {
+app.get('/api/decks', async (_req: Request, res: Response) => {
   try {
     const result = await sql`
       SELECT * FROM decks
@@ -68,7 +68,7 @@ app.get('/api/decks', async (req, res) => {
 });
 
 // Get single deck
-app.get('/api/decks/:id', async (req, res) => {
+app.get('/api/decks/:id', async (req: Request, res: Response) => {
   try {
     const result = await sql`
       SELECT * FROM decks WHERE id = ${req.params.id}
@@ -98,7 +98,7 @@ app.get('/api/decks/:id', async (req, res) => {
 });
 
 // Create deck
-app.post('/api/decks', async (req, res) => {
+app.post('/api/decks', async (req: Request, res: Response) => {
   try {
     const deck: Omit<Deck, 'createdAt' | 'updatedAt'> = req.body;
     const now = Date.now();
@@ -131,7 +131,7 @@ app.post('/api/decks', async (req, res) => {
 });
 
 // Update deck
-app.put('/api/decks/:id', async (req, res) => {
+app.put('/api/decks/:id', async (req: Request, res: Response) => {
   try {
     const updates = req.body;
     const now = Date.now();
@@ -177,7 +177,7 @@ app.put('/api/decks/:id', async (req, res) => {
 });
 
 // Delete deck
-app.delete('/api/decks/:id', async (req, res) => {
+app.delete('/api/decks/:id', async (req: Request, res: Response) => {
   try {
     await sql`DELETE FROM decks WHERE id = ${req.params.id}`;
     res.json({ success: true });

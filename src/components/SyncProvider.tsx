@@ -2,8 +2,7 @@
 
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { syncAllDecksFromNeon, SyncResult } from '../db/sync/syncFromNeon';
-import { getAllDecks } from '../db/training-coach/operations';
-import { NetworkError, getErrorMessage, isNetworkError } from '../utils/errorHandler';
+import { getErrorMessage, isNetworkError } from '../utils/errorHandler';
 import SyncErrorModal from './SyncErrorModal';
 
 interface SyncContextType {
@@ -78,9 +77,10 @@ export default function SyncProvider({ children }: SyncProviderProps) {
       if (hasInitialized) return;
 
       try {
-        // Check if API is configured
+        // In production/preview builds (Vercel), API is on same domain (relative URLs), so always try to sync
+        // In local development, check if VITE_API_URL is configured
         const apiUrl = import.meta.env.VITE_API_URL;
-        if (!apiUrl) {
+        if (!import.meta.env.PROD && !apiUrl) {
           console.log('[SyncProvider] API not configured, skipping sync');
           setHasInitialized(true);
           return;

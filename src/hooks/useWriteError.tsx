@@ -1,7 +1,7 @@
 // Hook for handling write operation errors with user-friendly modals
 
-import { useState, useCallback } from 'react';
-import { NetworkError, getErrorMessage, isNetworkError } from '../utils/errorHandler';
+import { useState, useCallback, ReactElement } from 'react';
+import { getErrorMessage } from '../utils/errorHandler';
 import SyncErrorModal from '../components/SyncErrorModal';
 
 export function useWriteError() {
@@ -12,7 +12,7 @@ export function useWriteError() {
   const handleError = useCallback((error: any, retry?: () => Promise<void>) => {
     const errorMessage = getErrorMessage(error);
     setError(errorMessage);
-    setRetryFn(retry ? () => async () => {
+    setRetryFn(retry ? async () => {
       try {
         await retry();
         setShowErrorModal(false);
@@ -31,15 +31,17 @@ export function useWriteError() {
     setRetryFn(null);
   }, []);
 
-  const ErrorModal = () => (
-    <SyncErrorModal
-      isOpen={showErrorModal}
-      title="Operation Failed"
-      message={error || 'An error occurred. Please try again.'}
-      onRetry={retryFn || undefined}
-      onClose={clearError}
-    />
-  );
+  const ErrorModal = (): ReactElement => {
+    return (
+      <SyncErrorModal
+        isOpen={showErrorModal}
+        title="Operation Failed"
+        message={error || 'An error occurred. Please try again.'}
+        onRetry={retryFn || undefined}
+        onClose={clearError}
+      />
+    );
+  };
 
   return {
     handleError,
@@ -48,4 +50,3 @@ export function useWriteError() {
     hasError: !!error,
   };
 }
-

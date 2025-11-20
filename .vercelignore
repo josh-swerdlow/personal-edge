@@ -1,0 +1,9 @@
+# Files to ignore when deploying to Vercel
+node_modules
+.env
+.env.local
+.env.*.local
+dist
+.vite
+*.log
+

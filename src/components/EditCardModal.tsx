@@ -47,6 +47,7 @@ export default function EditCardModal({
   onClose,
   card,
   sectionId,
+  sectionTitle,
   sections,
   deckDiscipline,
   onSave,
