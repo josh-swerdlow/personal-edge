@@ -1,0 +1,303 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://trainer.schema/db-update",
+  "title": "Database Update Schema",
+  "description": "Schema for bulk database updates (decks, sections, cards, and goals)",
+  "type": "object",
+  "properties": {
+    "decks": {
+      "type": "array",
+      "description": "Array of decks to import",
+      "items": {
+        "$ref": "#/definitions/Deck"
+      }
+    },
+    "goals": {
+      "type": "array",
+      "description": "Array of goals to import (optional)",
+      "items": {
+        "$ref": "#/definitions/Goal"
+      }
+    }
+  },
+  "definitions": {
+    "Deck": {
+      "type": "object",
+      "required": ["name", "sections"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Deck name (e.g., 'Backspin', 'Waltz Jump')"
+        },
+        "discipline": {
+          "type": "string",
+          "enum": ["Spins", "Jumps", "Edges"],
+          "description": "Discipline category for cycle filtering"
+        },
+        "animal": {
+          "type": "string",
+          "enum": ["bee", "duck", "cow", "rabbit", "dolphin", "squid"],
+          "description": "Animal icon assigned to deck"
+        },
+        "sections": {
+          "type": "array",
+          "description": "Array of sections within this deck",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/Section"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Section": {
+      "type": "object",
+      "required": ["title", "cards"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "enum": ["Reminders", "Troubleshooting", "Theory"],
+          "description": "Section title (e.g., 'Reminders', 'Troubleshooting', 'Theory')"
+        },
+        "sectionPrompt": {
+          "type": "string",
+          "description": "LLM prompt directing how to identify what information should be in this section. This is metadata only and not stored in the database.",
+          "enum": [
+            "Theory: This section contains bullet point lists describing every part of the body during every portion of the element. Use this section for anatomical/mechanical understanding of how the body should move through the element.",
+            "Troubleshooting: This section contains problem-solution pairs. Use this section when there's a specific issue, symptom, or feeling that needs diagnosis and resolution.",
+            "Reminders: This section contains concise cues, drills, exercises, or mental reminders. Use this for actionable items, practice drills (on-ice or off-ice), and quick reference cues."
+          ]
+        },
+        "cards": {
+          "type": "array",
+          "description": "Array of cards (notes) in this section",
+          "items": {
+            "$ref": "#/definitions/Card"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Card": {
+      "type": "object",
+      "required": ["content", "tags", "tags.onOffIce", "tags.partOfElement"],
+      "allOf": [
+        {
+          "properties": {
+            "content": {
+              "$ref": "#/definitions/TheoryContent"
+            }
+          },
+          "required": ["tags.bodyPosition.horizontalPlane", "tags.bodyPosition.mediaPlane", "tags.bodyPosition.frontalPlane"]
+        },
+        {
+          "properties": {
+            "content": {
+              "$ref": "#/definitions/TroubleshootingContent"
+            }
+          },
+          "required": []
+        },
+        {
+          "properties": {
+            "content": {
+              "$ref": "#/definitions/ReminderContent"
+            }
+          },
+          "required": []
+        }
+      ],
+      "properties": {
+        "content": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/TheoryContent"
+            },
+            {
+              "$ref": "#/definitions/TroubleshootingContent"
+            },
+            {
+              "$ref": "#/definitions/ReminderContent"
+            }
+          ],
+          "description": "Card content structure - varies by section type"
+        },
+        "tags": {
+          "type": "object",
+          "description": "Structured tags capturing card context",
+          "properties": {
+            "onOffIce": {
+              "type": "string",
+              "enum": ["On Ice", "Off Ice"],
+              "description": "Whether the card is relevant on ice or off ice"
+            },
+            "partOfElement": {
+              "type": "string",
+              "enum": ["Set", "Load", "Jump", "Snap", "Exit"],
+              "description": "Which part of the element this card refers to"
+            },
+            "bodyPosition": {
+              "type": "object",
+              "description": "Body position details in different planes",
+              "properties": {
+                "frontalPlane": {
+                  "type": "string",
+                  "enum": ["Front", "Back"],
+                  "description": "Body orientation on the frontal plane"
+                },
+                "mediaPlane": {
+                  "type": "string",
+                  "enum": ["Free Side", "Skating Side"],
+                  "description": "Body side (media plane)"
+                },
+                "horizontalPlane": {
+                  "type": "string",
+                  "enum": ["Upper Body", "Lower Body"],
+                  "description": "Upper or lower body (horizontal plane)"
+                }
+              },
+              "additionalProperties": false
+            },
+            "wildcard": {
+              "type": "array",
+              "description": "Additional tags",
+              "items": {
+                "type": "string",
+                "description": "User-defined tags"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "helpfulnessScore": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Explicit upvote count (defaults to 0)"
+        },
+        "priority": {
+          "type": "boolean",
+          "default": false,
+          "description": "Priority flag (overrides helpfulness sorting)"
+        },
+        "markedForMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Cleanup workflow tag"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TheoryContent": {
+      "type": "object",
+      "required": ["bodyParts"],
+      "properties": {
+        "llm": {
+          "type": "string",
+          "description": "LLM guidance for structuring this Theory content",
+          "const": "Create a bullet point list for every part of your body during every portion of the element based on what is avaialble in the input text. Each body part should be listed with the portion of the element (Set, Load, Jump, etc.) and a description of what that body part should be doing."
+        },
+        "bodyParts": {
+          "type": "array",
+          "description": "List of body parts and their actions during each portion of the element",
+          "items": {
+            "type": "object",
+            "required": ["bodyPart", "portion", "description"],
+            "properties": {
+              "bodyPart": {
+                "type": "string",
+                "description": "Name of the body part (e.g., 'Right hip', 'Left shoulder', 'Core')"
+              },
+              "portion": {
+                "type": "string",
+                "enum": ["Set", "Load", "Jump", "Snap", "Exit"],
+                "description": "Which portion of the element this applies to"
+              },
+              "description": {
+                "type": "string",
+                "description": "What this body part should be doing during this portion"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "TroubleshootingContent": {
+      "type": "object",
+      "required": ["feeling", "issue", "solution"],
+      "properties": {
+        "llm": {
+          "type": "string",
+          "description": "LLM guidance for structuring this Troubleshooting content",
+          "const": "Include: Feeling (what you feel in the moment and where), Tests (how to determine if you're feeling this), Issue (what is wrong), Solution (how to fix), Regressions (potential regressions or things to watch out for)."
+        },
+        "feeling": {
+          "type": "string",
+          "description": "What do you feel in the moment? Where do you feel it?"
+        },
+        "tests": {
+          "type": "string",
+          "description": "How to determine if you are feeling this"
+        },
+        "issue": {
+          "type": "string",
+          "description": "A succinct sentence describing the root cause."
+        },
+        "solution": {
+          "type": "string",
+          "description": "How to fix the issue"
+        },
+        "regressions": {
+          "type": "string",
+          "description": "Potential regressions."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReminderContent": {
+      "type": "object",
+      "required": ["content"],
+      "properties": {
+        "llm": {
+          "type": "string",
+          "description": "LLM guidance for structuring this Reminder content",
+          "const": "Provide concise cues, drills, or reminders. Can be on-ice or off-ice exercises, mental cues, or technique reminders. Keep it brief and actionable."
+        },
+        "content": {
+          "type": "string",
+          "description": "The reminder text - concise cue, drill, or exercise description"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Goal": {
+      "type": "object",
+      "required": ["discipline", "type", "content"],
+      "properties": {
+        "discipline": {
+          "type": "string",
+          "enum": ["Spins", "Jumps", "Edges"],
+          "description": "Discipline category"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["primary", "working"],
+          "description": "Goal type"
+        },
+        "content": {
+          "type": "string",
+          "description": "Goal content text"
+        },
+        "weekStartDate": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO date string for the week this goal belongs to"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

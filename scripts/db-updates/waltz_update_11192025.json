@@ -1,0 +1,326 @@
+{
+  "decks": [
+    {
+      "name": "Waltz Jump",
+      "discipline": "Jumps",
+      "sections": [
+        {
+          "title": "Troubleshooting",
+          "cards": [
+            {
+              "content": {
+                "condition": "For when the jump feels like there's only one beat instead of two",
+                "feeling": "It feels like there's only one beat to the jump instead of two. There should be two because there is an axis change in the air. If I only feel one, I probably didn't change axis.",
+                "issue": "Not changing axis in the air, causing the jump to feel like one beat instead of two. This happens with symptoms: sassy hip in the load, square hips in the load, turning on the ice before jumping, free leg and arm kicking across body instead of out, stepping down and having to adjust hips/recenter chest/drop (hip isn't engaging), and even with all of this, unless I prime the glute medius to fire, I'm still sassy-ing a little.",
+                "solution": "Address the root causes: Lower body - Set: Squeeze free glute medius and engage skating inner thigh to align free leg's foot, knee, and hip. Step: Step perpendicular to skating edge, not parallel. Load: Switch hips - lift free side instead of loading with flat hips. Upper body - Set: Belly button should track knee and foot, not be behind the path of free side, to enable hinging onto standing hip.",
+                "regressions": "Watch for: sassy hip, square hips, turning on ice before jumping, free leg and arm kicking across body, stepping down with misalignment. Use drills: Set up jumps with marking posts, do baby waltz jump but jump straight, hold the load to feel free side staying back and when it releases."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Jump",
+                "wildcard": ["axis", "timing", "two-beat", "sassy-hip", "square-hips"]
+              },
+              "priority": true
+            },
+            {
+              "content": {
+                "condition": "Do this if you have a sassy hip in the load",
+                "feeling": "Hip is sassy (sticking out to the side) during the load phase",
+                "issue": "Free glute medius and skating inner thigh not squeezing in the set, causing free leg's foot, knee, and hip to be unaligned. When stepping down, they are already primed to sassy. Even with other fixes, unless glute medius is primed to fire, still sassy-ing a little.",
+                "solution": "On the set, squeeze free glute medius and engage skating inner thigh together. Prime the glute medius to fire. This aligns the free leg's foot, knee, and hip so they're not primed to sassy when stepping down."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Set",
+                "wildcard": ["hip", "sassy", "glute-medius", "inner-thigh"]
+              }
+            },
+            {
+              "content": {
+                "condition": "Do this if you have square hips in the load",
+                "feeling": "Hips are square (not rotated/switched) during the load",
+                "issue": "Not switching hips, loading with flat hips instead of lifting free side",
+                "solution": "Switch hips - lift the free side. Free and standing hips need to switch. After loading and lifting the free hip, then start hinging into the standing hip."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Load",
+                "wildcard": ["hip", "square", "hip-switch"]
+              }
+            },
+            {
+              "content": {
+                "condition": "Do this if you're turning on the ice before jumping",
+                "feeling": "Rotation happens on the ice before leaving the ice",
+                "issue": "Pre-rotation - turning on the ice instead of in the air",
+                "solution": "Jump straight up, not turning. Set up jumps with marking posts to ensure straight entry."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Jump",
+                "wildcard": ["entry", "pre-rotation", "straight"]
+              }
+            },
+            {
+              "content": {
+                "condition": "Do this if free leg and arm are kicking across your body instead of out",
+                "feeling": "Free leg and arm move across the body rather than extending outward",
+                "issue": "Free side not staying back, causing compensatory movement across the body",
+                "solution": "Keep free side back. Free leg and arm should extend out, not across the body."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Load",
+                "wildcard": ["free-leg", "arm", "kicking"]
+              }
+            },
+            {
+              "content": {
+                "condition": "Do this if you step down and have to adjust your hips, recenter your chest, and drop",
+                "feeling": "When stepping down, need to make multiple adjustments - hips, chest, and dropping",
+                "issue": "Hip isn't engaging. Belly button not tracking knee and foot in the set, so by the time you step down, you need to shift chest over.",
+                "solution": "On the set, ensure belly button tracks the knee and foot. Engage the hip properly. Prime glute medius to fire."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Set",
+                "wildcard": ["step-down", "hip", "chest", "engagement", "belly-button"]
+              }
+            },
+            {
+              "content": {
+                "condition": "Do this if you're stepping parallel instead of perpendicular to your skating edge",
+                "feeling": "Step direction feels parallel to the edge rather than perpendicular",
+                "issue": "Stepping parallel causes hips to open up excessively, exacerbating sassy hip",
+                "solution": "Step perpendicular to your skating edge, not parallel"
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Set",
+                "wildcard": ["step", "edge", "parallel", "perpendicular"]
+              }
+            }
+          ]
+        },
+        {
+          "title": "Theory",
+          "cards": [
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Free glute medius",
+                    "portion": "Set",
+                    "description": "Should be squeezing along with standing inner thigh to align free leg's foot, knee, and hip"
+                  },
+                  {
+                    "bodyPart": "Standing inner thigh",
+                    "portion": "Set",
+                    "description": "Should be engaging/squeezing along with free glute medius to maintain alignment"
+                  },
+                  {
+                    "bodyPart": "Free leg",
+                    "portion": "Set",
+                    "description": "Foot, knee, and hip should be aligned. If not squeezing glute medius and inner thigh, they become unaligned and primed to sassy when stepping down"
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Set",
+                "bodyPosition": {
+                  "horizontalPlane": "Lower Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Back"
+                },
+                "wildcard": ["glute-medius", "inner-thigh", "alignment"]
+              }
+            },
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Belly button",
+                    "portion": "Set",
+                    "description": "Should track the knee and foot, not be behind the path of free side. This enables hinging onto standing hip"
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Set",
+                "bodyPosition": {
+                  "horizontalPlane": "Upper Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Front"
+                },
+                "wildcard": ["belly-button", "tracking"]
+              }
+            },
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Free hip",
+                    "portion": "Load",
+                    "description": "Should lift. Free and standing hips need to switch - lift free side instead of loading with flat hips"
+                  },
+                  {
+                    "bodyPart": "Standing hip",
+                    "portion": "Load",
+                    "description": "Should switch with free hip. After loading and lifting the free hip, then start hinging into the standing hip"
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Load",
+                "bodyPosition": {
+                  "horizontalPlane": "Lower Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Back"
+                },
+                "wildcard": ["hip", "switch", "lift"]
+              }
+            },
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Free glute",
+                    "portion": "Set",
+                    "description": "Should be squeezing together with standing glute in the set and through the load"
+                  },
+                  {
+                    "bodyPart": "Standing glute",
+                    "portion": "Set",
+                    "description": "Should be squeezing together with free glute in the set and through the load"
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Set",
+                "bodyPosition": {
+                  "horizontalPlane": "Lower Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Back"
+                },
+                "wildcard": ["glutes", "squeezing"]
+              }
+            },
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Free lat",
+                    "portion": "Load",
+                    "description": "Right side load: starts squeezing while skating lat holds shape. Left side load: is squeezing while skating lat holds shape"
+                  },
+                  {
+                    "bodyPart": "Skating lat",
+                    "portion": "Load",
+                    "description": "Right side load: holds shape while free lat starts squeezing. Left side load: holds shape while free lat is squeezing"
+                  },
+                  {
+                    "bodyPart": "Lats",
+                    "portion": "Load",
+                    "description": "Switch between being 'engaged/squeezing' and static/holding from entrance to load. Cross tension (seatbelt): both are holding shape"
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Load",
+                "bodyPosition": {
+                  "horizontalPlane": "Upper Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Back"
+                },
+                "wildcard": ["lats", "squeezing", "holding", "cross-tension", "seatbelt"]
+              }
+            },
+            {
+              "content": {
+                "bodyParts": [
+                  {
+                    "bodyPart": "Body axis",
+                    "portion": "Jump",
+                    "description": "Should change in the air - there should be two beats to the jump, not one. If only feeling one beat, axis didn't change."
+                  }
+                ]
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Jump",
+                "bodyPosition": {
+                  "horizontalPlane": "Lower Body",
+                  "mediaPlane": "Free Side",
+                  "frontalPlane": "Back"
+                },
+                "wildcard": ["axis", "timing", "two-beat"]
+              },
+              "priority": true
+            }
+          ]
+        },
+        {
+          "title": "Reminders",
+          "cards": [
+            {
+              "content": {
+                "text": "Set up my jumps with marking posts"
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Set",
+                "wildcard": ["drill", "set-up", "marking-posts"]
+              }
+            },
+            {
+              "content": {
+                "text": "Set: Emphasis on belly button tracking. Anything to engage the inner thighs (ball on between legs or kneeling thigh squeezes with band)."
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Set",
+                "wildcard": ["belly-button", "tracking", "inner-thigh", "engagement"]
+              }
+            },
+            {
+              "content": {
+                "text": "Hold the load and really get a sense of feeling for the free side staying back. This shouldn't be possible forever and so I also need to get a feel for when it starts to release so I can USE THAT to jump."
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Load",
+                "wildcard": ["drill", "timing", "release"]
+              },
+              "priority": true
+            },
+            {
+              "content": {
+                "text": "Load: The lats switch between being 'engaged/squeezing' and static/holding from the entrance to the load. Right side load: The free lat starts squeezing while the skating lat is holding shape. Cross tension (seatbelt): both are holding shape. Left side load: The free lat is squeezing and the skating lat is holding shape. Free and standing glutes should be squeezing together in the set and through the load. Free and standing hips need to switch at the load. After I load and lift the free hip, THEN start hinging into the standing hip and drawing my arms back."
+              },
+              "tags": {
+                "onOffIce": "Off Ice",
+                "partOfElement": "Load",
+                "wildcard": ["lats", "glutes", "hips", "squeezing", "holding", "cross-tension", "seatbelt", "hinging", "timing"]
+              }
+            },
+            {
+              "content": {
+                "text": "Do a baby waltz jump, but jump straight"
+              },
+              "tags": {
+                "onOffIce": "On Ice",
+                "partOfElement": "Jump",
+                "wildcard": ["drill", "baby-jump", "straight"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

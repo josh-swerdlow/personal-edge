@@ -1,0 +1,67 @@
+{
+  "decks": [
+    {
+      "name": "Backspin",
+      "discipline": "Spins",
+      "tags": ["spin", "beginner"],
+      "animal": "bee",
+      "sections": [
+        {
+          "title": "Reminders",
+          "cards": [
+            {
+              "content": "Lead with right hip",
+              "tags": ["hip", "free"],
+              "helpfulnessScore": 3
+            },
+            {
+              "content": "Keep left shoulder down",
+              "tags": ["shoulder", "front"],
+              "helpfulnessScore": 5,
+              "priority": true
+            }
+          ]
+        },
+        {
+          "title": "Troubleshooting",
+          "cards": [
+            {
+              "content": "Losing center — overrotating. Remedy: tighten arm path.",
+              "tags": ["core", "balance", "arms", "upper"],
+              "helpfulnessScore": 2
+            }
+          ]
+        },
+        {
+          "title": "Theory",
+          "cards": [
+            {
+              "content": "Maintain axis through shoulders & hips",
+              "helpfulnessScore": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Waltz Jump",
+      "discipline": "Jumps",
+      "tags": ["jump", "entry", "beginner"],
+      "sections": [
+        {
+          "title": "Reminders",
+          "cards": [
+            {
+              "content": "Hips ahead of entry",
+              "tags": ["hip", "entry"],
+              "helpfulnessScore": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+			"name": "Forward Outside 3-Turn",
+    }
+  ]
+}
