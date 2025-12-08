@@ -1,1 +1,6 @@
-Populate decks and goals and push to Neon.
+https://mermaid.live/edit#pako:eNp9kl1PwjAUhv9Kc7wdpC0Utl6YsKEX3mpiIjOmsMNHYN2yjwQE_rstyuwQ7M3WPj3vc7p1D7MsQZCwKFS-JC_jWBMzynr6vRDtZhv8YJPTk7D3b2zHiE2e85Umr4hrcueSkE2e6jS_QiI2eUgWeEFQJ7G-6uU_Xu56uet1Schdr0si7nr5X--IkU7n_vCImEzVbE2soTyYk_yLozaOClQVlkTjtiJNjwfT8VkTXuTYdp2cG9jWO7ilaQ5smm000UWOPbuTcwOHbdzSNF_PNGu2gWfuyyoBWRU1epBikSo7hb2NiKFaYooxSPOa4FzVmyqGWB9NWa70W5al58oiqxdLkHO1Kc2szhOjHK-UuQO_W8xvwiLKal2B7PVPESD3sAUZDLoBHQZ86PvCF0x4sAPJqN8dUMYEF4z7A8rZ0YPPk5N2hej1KRtSux5Q0Tt-AQIt4Zk
+
+Minimize the number of cards that realistically appear.
+- Reminders: Only 1 card per part of the element
+- Troubleshooting: Maybe section these to be viewed quickly by 'feeling'. One feeling can have multiple issues to fix.
+- Theory: Ignore for now and just let it sprawl.
