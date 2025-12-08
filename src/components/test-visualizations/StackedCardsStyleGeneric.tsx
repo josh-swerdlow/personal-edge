@@ -50,7 +50,7 @@ const CardContent = ({
   showHelpfulnessScore?: boolean;
   showStar?: boolean;
 }) => {
-  const title = getTitle ? getTitle(card, sectionTitle) : sectionTitle;
+  const title = getTitle ? getTitle(card, sectionTitle) : (card.title || sectionTitle);
   const content = getContent ? getContent(card) : card.content;
   const tags = getTags ? getTags(card) : (card.tags || []);
 

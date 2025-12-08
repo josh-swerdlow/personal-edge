@@ -108,6 +108,10 @@
         }
       ],
       "properties": {
+        "title": {
+          "type": "string",
+          "description": "User-provided title for the card"
+        },
         "content": {
           "oneOf": [
             {

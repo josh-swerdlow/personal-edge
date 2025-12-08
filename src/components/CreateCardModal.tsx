@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { findSimilarCards, SimilarCard } from '../utils/fuzzyMatch';
-import { BODY_SECTION_TAGS, getDisciplineTags, TAG_GROUPS } from '../utils/tags';
+import { BODY_SECTION_TAGS, getDisciplineTags, getExerciseSequenceTags, TAG_GROUPS } from '../utils/tags';
 
 const FRONT_BACK_GROUP = TAG_GROUPS.frontBack;
 const FREE_GLIDE_GROUP = TAG_GROUPS.freeGlide;
@@ -25,7 +25,7 @@ interface CreateCardModalProps {
   sectionId: string;
   sections?: Array<{ id: string; title: string }>; // All sections in deck for dropdown
   deckDiscipline?: 'Spins' | 'Jumps' | 'Edges';
-  onSave: (content: string, tags: string[], sectionId: string, onIce: boolean | null, createdAt?: number) => Promise<void>;
+  onSave: (content: string, tags: string[], sectionId: string, onIce: boolean | null, createdAt?: number, title?: string) => Promise<void>;
   allCards: Array<{
     content: string;
     deckId: string;
@@ -49,6 +49,7 @@ export default function CreateCardModal({
   onSave,
   allCards,
 }: CreateCardModalProps) {
+  const [cardTitle, setCardTitle] = useState('');
   const [cardText, setCardText] = useState('');
   const [selectedSequence, setSelectedSequence] = useState<string>('');
   const [selectedBodyTags, setSelectedBodyTags] = useState<string[]>([]);
@@ -71,6 +72,7 @@ export default function CreateCardModal({
   useEffect(() => {
     if (!isOpen) {
       // Reset form when modal closes
+      setCardTitle('');
       setCardText('');
       setSelectedSequence('');
       setSelectedBodyTags([]);
@@ -176,18 +178,24 @@ export default function CreateCardModal({
       ...selectedBodyTags,
     ];
 
-    // Validate body position tags: must have one from each group
-    const hasFrontBack = selectedBodyTags.some(isFrontBackTag);
-    const hasFreeGlide = selectedBodyTags.some(isFreeGlideTag);
-    const hasUpperLower = selectedBodyTags.some(isUpperLowerTag);
+    const selectedSection = sections?.find(s => s.id === selectedSectionId);
+    const currentSectionTitle = selectedSection?.title || sectionTitle;
+    const isExercises = currentSectionTitle === 'Exercises';
 
-    if (!hasFrontBack || !hasFreeGlide || !hasUpperLower) {
-      setTagError('Please select one option from each group: Anterior/Posterior, Free Side/Skating Side, and Superior/Inferior.');
-      return;
+    // Validate body position tags: must have one from each group (unless it's exercises)
+    if (!isExercises) {
+      const hasFrontBack = selectedBodyTags.some(isFrontBackTag);
+      const hasFreeGlide = selectedBodyTags.some(isFreeGlideTag);
+      const hasUpperLower = selectedBodyTags.some(isUpperLowerTag);
+
+      if (!hasFrontBack || !hasFreeGlide || !hasUpperLower) {
+        setTagError('Please select one option from each group: Anterior/Posterior, Free Side/Skating Side, and Superior/Inferior.');
+        return;
+      }
     }
 
-    // Validate sequence tag is required
-    if (!selectedSequence) {
+    // Validate sequence tag is required (unless it's exercises)
+    if (!isExercises && !selectedSequence) {
       setTagError('Please select a sequence tag (Part of Element).');
       return;
     }
@@ -198,19 +206,23 @@ export default function CreateCardModal({
     const createdAt = dateObj.getTime();
 
     setTagError('');
-    await onSave(cardText.trim(), allTags, selectedSectionId, onIce, createdAt);
+    await onSave(cardText.trim(), allTags, selectedSectionId, onIce, createdAt, cardTitle.trim() || undefined);
     onClose();
   }
 
   const selectedSection = sections?.find(s => s.id === selectedSectionId);
   const currentSectionTitle = selectedSection?.title || sectionTitle;
+  const isExercises = currentSectionTitle === 'Exercises';
 
   if (!isOpen) return null;
 
   const disciplineTags = deckDiscipline ? getDisciplineTags(deckDiscipline) : [];
-  const sequenceTags = disciplineTags.filter(t =>
-    TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
-  );
+  // For exercises, use exercise sequence tags; otherwise use discipline tags
+  const sequenceTags = isExercises
+    ? getExerciseSequenceTags()
+    : disciplineTags.filter(t =>
+        TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
+      );
 
   // Group similar cards by deck
   const cardsByDeck = new Map<string, SimilarCard[]>();
@@ -263,6 +275,20 @@ export default function CreateCardModal({
             </div>
           )}
 
+          {/* Card Title */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-white/90 mb-2">
+              Title <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              value={cardTitle}
+              onChange={(e) => setCardTitle(e.target.value)}
+              className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+              placeholder="Enter card title..."
+            />
+          </div>
+
           {/* Card Text */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-white/90 mb-2">
@@ -281,7 +307,7 @@ export default function CreateCardModal({
           {sequenceTags.length > 0 && (
             <div className="mb-4">
               <label className="block text-sm font-medium text-white/90 mb-2">
-                Part of Element <span className="text-red-400">*</span>
+                Part of Element {!isExercises && <span className="text-red-400">*</span>}
               </label>
               <div className="flex flex-wrap gap-2">
                 {sequenceTags.map(tag => (
@@ -305,8 +331,8 @@ export default function CreateCardModal({
           {/* Body Tags */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-white/90 mb-2">
-              Body Position <span className="text-red-400">*</span>
-              <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>
+              Body Position {!isExercises && <span className="text-red-400">*</span>}
+              {!isExercises && <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>}
             </label>
             <div className="space-y-3">
               {/* Anterior/Posterior Group */}
@@ -500,7 +526,7 @@ export default function CreateCardModal({
             <button
               type="button"
               onClick={handleSave}
-              disabled={!cardText.trim()}
+              disabled={!cardText.trim() || !cardTitle.trim()}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-gray-500/50 disabled:cursor-not-allowed"
             >
               Save Card

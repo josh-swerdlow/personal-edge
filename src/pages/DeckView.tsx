@@ -92,7 +92,7 @@ export default function DeckView() {
     setAllCards(cardsWithLocation);
   }
 
-  async function handleCreateCard(content: string, tags: string[], sectionId: string, onIce: boolean | null, createdAt?: number) {
+  async function handleCreateCard(content: string, tags: string[], sectionId: string, onIce: boolean | null, createdAt?: number, title?: string) {
     if (!deck || !deckId) return;
 
     // Add on-ice/off-ice tag if specified
@@ -102,6 +102,7 @@ export default function DeckView() {
     }
 
     await addCardToSection(deckId, sectionId, {
+      title: title?.trim() || undefined,
       content: content.trim(),
       tags: allTags.length > 0 ? allTags : undefined,
       helpfulnessScore: 0,
@@ -126,7 +127,8 @@ export default function DeckView() {
     tags: string[],
     newSectionId: string,
     priority: boolean,
-    helpfulnessScore: number
+    helpfulnessScore: number,
+    title?: string
   ) {
     if (!deckId || !editingCard) return;
 
@@ -135,6 +137,7 @@ export default function DeckView() {
       // For now, just update in place - moving cards between sections would require moveCard operation
       // This is a simplified version - you might want to implement moveCard later
       await updateCard(deckId, editingCard.sectionId, editingCard.card.id, {
+        title: title?.trim() || undefined,
         content,
         tags,
         priority,
@@ -142,6 +145,7 @@ export default function DeckView() {
       });
     } else {
       await updateCard(deckId, editingCard.sectionId, editingCard.card.id, {
+        title: title?.trim() || undefined,
         content,
         tags,
         priority,

@@ -508,14 +508,14 @@ export default function DeckCardView({
         <div className="liquid-glass__content deck-card__content">
           {/* Header - Top Left */}
           <div className="text-left mb-4">
-            {/* Section Title - Responsive sizing to fit card */}
+            {/* Card Title - Responsive sizing to fit card */}
             <h2 className={`text-lg md:text-xl lg:text-2xl font-bold break-words ${sectionColors[currentCard.sectionTitle] || 'text-black'}`}>
-              {currentCard.sectionTitle}
+              {currentCard.card.title || currentCard.sectionTitle}
             </h2>
           </div>
 
           {/* Animal Icon - Top Right */}
-          <div className="absolute top-4 right-4 z-10">
+          <div className="absolute top-4 right-4 z-10 flex flex-col items-end">
             <img
               src={getDeckIconPath(deck.animal, deck.discipline, currentCard.sectionTitle)}
               alt={`${deck.animal || 'bee'} ${currentCard.sectionTitle}`}
@@ -525,6 +525,7 @@ export default function DeckCardView({
                 e.currentTarget.style.display = 'none';
               }}
             />
+            <span className="text-xs text-gray-600 mt-1">({currentCard.sectionTitle})</span>
           </div>
 
           {/* Content Area - Left justified, scrollable */}

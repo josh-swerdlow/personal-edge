@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { findSimilarCards, SimilarCard } from '../utils/fuzzyMatch';
-import { BODY_SECTION_TAGS, getDisciplineTags, TAG_GROUPS } from '../utils/tags';
+import { BODY_SECTION_TAGS, getDisciplineTags, getExerciseSequenceTags, TAG_GROUPS } from '../utils/tags';
 import { Card } from '../db/training-coach/types';
 
 const FRONT_BACK_GROUP = TAG_GROUPS.frontBack;
@@ -27,7 +27,7 @@ interface EditCardModalProps {
   sectionId: string;
   sections?: Array<{ id: string; title: string }>;
   deckDiscipline?: 'Spins' | 'Jumps' | 'Edges';
-  onSave: (content: string, tags: string[], sectionId: string, priority: boolean, helpfulnessScore: number) => Promise<void>;
+  onSave: (content: string, tags: string[], sectionId: string, priority: boolean, helpfulnessScore: number, title?: string) => Promise<void>;
   onDelete: () => Promise<void>;
   allCards: Array<{
     content: string;
@@ -54,6 +54,7 @@ export default function EditCardModal({
   onDelete,
   allCards,
 }: EditCardModalProps) {
+  const [cardTitle, setCardTitle] = useState(card.title || '');
   const [cardText, setCardText] = useState(card.content);
   const [selectedSequence, setSelectedSequence] = useState<string>('');
   const [selectedBodyTags, setSelectedBodyTags] = useState<string[]>([]);
@@ -68,6 +69,7 @@ export default function EditCardModal({
   // Initialize form from card data
   useEffect(() => {
     if (isOpen && card) {
+      setCardTitle(card.title || '');
       setCardText(card.content);
       setPriority(card.priority);
       setHelpfulnessScore(card.helpfulnessScore);
@@ -171,22 +173,30 @@ export default function EditCardModal({
       ...selectedBodyTags,
     ];
 
-    const hasFrontBack = selectedBodyTags.some(isFrontBackTag);
-    const hasFreeGlide = selectedBodyTags.some(isFreeGlideTag);
-    const hasUpperLower = selectedBodyTags.some(isUpperLowerTag);
+    const selectedSection = sections?.find(s => s.id === selectedSectionId);
+    const currentSectionTitle = selectedSection?.title || sectionTitle;
+    const isExercises = currentSectionTitle === 'Exercises';
 
-    if (!hasFrontBack || !hasFreeGlide || !hasUpperLower) {
-      setTagError('Please select one option from each group: Anterior/Posterior, Free Side/Skating Side, and Superior/Inferior.');
-      return;
+    // Validate body position tags: must have one from each group (unless it's exercises)
+    if (!isExercises) {
+      const hasFrontBack = selectedBodyTags.some(isFrontBackTag);
+      const hasFreeGlide = selectedBodyTags.some(isFreeGlideTag);
+      const hasUpperLower = selectedBodyTags.some(isUpperLowerTag);
+
+      if (!hasFrontBack || !hasFreeGlide || !hasUpperLower) {
+        setTagError('Please select one option from each group: Anterior/Posterior, Free Side/Skating Side, and Superior/Inferior.');
+        return;
+      }
     }
 
-    if (!selectedSequence) {
+    // Validate sequence tag is required (unless it's exercises)
+    if (!isExercises && !selectedSequence) {
       setTagError('Please select a sequence tag (Part of Element).');
       return;
     }
 
     setTagError('');
-    await onSave(cardText.trim(), allTags, selectedSectionId, priority, helpfulnessScore);
+    await onSave(cardText.trim(), allTags, selectedSectionId, priority, helpfulnessScore, cardTitle.trim() || undefined);
     onClose();
   }
 
@@ -197,10 +207,17 @@ export default function EditCardModal({
 
   if (!isOpen) return null;
 
+  const selectedSection = sections?.find(s => s.id === selectedSectionId);
+  const currentSectionTitle = selectedSection?.title || sectionTitle;
+  const isExercises = currentSectionTitle === 'Exercises';
+
   const disciplineTags = deckDiscipline ? getDisciplineTags(deckDiscipline) : [];
-  const sequenceTags = disciplineTags.filter(t =>
-    TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
-  );
+  // For exercises, use exercise sequence tags; otherwise use discipline tags
+  const sequenceTags = isExercises
+    ? getExerciseSequenceTags()
+    : disciplineTags.filter(t =>
+        TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
+      );
 
   const cardsByDeck = new Map<string, SimilarCard[]>();
   similarCards.forEach(card => {
@@ -251,6 +268,20 @@ export default function EditCardModal({
             </div>
           )}
 
+          {/* Card Title */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-white/90 mb-2">
+              Title <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              value={cardTitle}
+              onChange={(e) => setCardTitle(e.target.value)}
+              className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+              placeholder="Enter card title..."
+            />
+          </div>
+
           <div className="mb-4">
             <label className="block text-sm font-medium text-white/90 mb-2">
               Card Text <span className="text-red-400">*</span>
@@ -267,7 +298,7 @@ export default function EditCardModal({
           {sequenceTags.length > 0 && (
             <div className="mb-4">
               <label className="block text-sm font-medium text-white/90 mb-2">
-                Part of Element <span className="text-red-400">*</span>
+                Part of Element {!isExercises && <span className="text-red-400">*</span>}
               </label>
               <div className="flex flex-wrap gap-2">
                 {sequenceTags.map(tag => (
@@ -290,8 +321,8 @@ export default function EditCardModal({
 
           <div className="mb-4">
             <label className="block text-sm font-medium text-white/90 mb-2">
-              Body Position <span className="text-red-400">*</span>
-              <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>
+              Body Position {!isExercises && <span className="text-red-400">*</span>}
+              {!isExercises && <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>}
             </label>
             <div className="space-y-3">
               <div>
@@ -368,8 +399,6 @@ export default function EditCardModal({
               Priority
             </label>
             {(() => {
-              const selectedSection = sections?.find(s => s.id === selectedSectionId);
-              const currentSectionTitle = selectedSection?.title || sectionTitle;
               const isRestricted = currentSectionTitle === 'Troubleshooting' || currentSectionTitle === 'Theory';
 
               if (isRestricted) {
@@ -491,7 +520,7 @@ export default function EditCardModal({
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={!cardText.trim()}
+                disabled={!cardText.trim() || !cardTitle.trim()}
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-gray-500/50 disabled:cursor-not-allowed"
               >
                 Save Changes

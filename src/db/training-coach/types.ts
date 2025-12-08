@@ -20,6 +20,7 @@ export interface Section {
 export interface Card {
   id: string;
   sectionId: string;                // FK to section
+  title?: string;                   // User-provided title for the card
   content: string;                  // The actual note/cue text
   tags?: string[];
   helpfulnessScore: number;         // Explicit upvote count

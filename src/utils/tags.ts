@@ -50,3 +50,16 @@ export function getDisciplineTags(discipline?: 'Spins' | 'Jumps' | 'Edges'): Arr
   }
 }
 
+// Get sequence tags for exercises (combines all sequence options)
+export function getExerciseSequenceTags(): Array<{ id: string; label: string }> {
+  // Combine unique sequence tags from both spins and jumps
+  const allTags = [...SPIN_TAGS, ...JUMP_TAGS];
+  const uniqueTags = new Map<string, { id: string; label: string }>();
+  allTags.forEach(tag => {
+    if (!uniqueTags.has(tag.id)) {
+      uniqueTags.set(tag.id, tag);
+    }
+  });
+  return Array.from(uniqueTags.values());
+}
+
