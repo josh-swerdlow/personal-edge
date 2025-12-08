@@ -4,19 +4,17 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:with-seed": "VITE_ENABLE_SEED=true vite",
-    "build": "tsc && tsc -p tsconfig.server.json --noEmit && vite build",
-    "build:backend": "tsc -p tsconfig.server.json --noEmit",
-    "build:with-seed": "VITE_ENABLE_SEED=true tsc && vite",
+    "dev:client": "vite",
+    "client:with-seed": "VITE_ENABLE_SEED=true vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build:client": "tsc && tsc -p tsconfig.server.json --noEmit && vite build",
+    "build:server": "tsc -p tsconfig.server.json --noEmit",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "clean": "rm -rf dist dist-ssr .vite node_modules/.vite",
     "prebuild": "pnpm run clean",
     "generate-icons": "node scripts/generate-icons.js",
-    "import:neon": "tsx scripts/importToNeon.ts",
-    "backend": "tsx server/index.ts",
-    "dev:backend": "tsx watch server/index.ts"
+    "import:neon": "tsx scripts/importToNeon.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.0",
