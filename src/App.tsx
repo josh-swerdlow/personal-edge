@@ -13,6 +13,7 @@ import SearchBar from './components/SearchBar';
 import SyncProvider from './components/SyncProvider';
 import { getAppData, getCurrentFocus, getDaysUntilNextCycle } from './db/progress-tracker/operations';
 import { cn } from './utils/cn';
+import { logger } from './utils/logger';
 
 // Context to track intro state
 const IntroContext = createContext<{ isIntroActive: boolean; setIntroActive: (active: boolean) => void }>({
@@ -63,7 +64,7 @@ function AppContent() {
         const daysRemaining = getDaysUntilNextCycle(appData.startDate);
         setCurrentWeekInfo({ focus, daysRemaining });
       } catch (error) {
-        console.error('Failed to load week info:', error);
+        logger.error('Failed to load week info:', error);
       }
     }
     loadWeekInfo();

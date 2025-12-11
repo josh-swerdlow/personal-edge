@@ -1,5 +1,5 @@
 import { progressTrackerDB } from './db';
-import { AppData, Goal } from './types';
+import { AppData, Goal, GoalContainer } from './types';
 import { DISCIPLINES } from '../../utils/disciplines';
 
 // Simple UUID v4 generator for browser
@@ -200,6 +200,315 @@ export async function archiveWeek(
         });
       }
     }
+  }
+}
+
+// Goal Container Operations
+// Helper: Build a GoalContainer from goals
+function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContainer {
+  return {
+    id: primaryGoal.id,
+    discipline: primaryGoal.discipline,
+    primaryGoalId: primaryGoal.id,
+    workingGoalIds: workingGoals.map(g => g.id),
+    createdAt: primaryGoal.createdAt,
+    weekStartDate: primaryGoal.weekStartDate,
+  };
+}
+
+// Get all goal containers for a discipline
+export async function getGoalContainersByDiscipline(
+  discipline: "Spins" | "Jumps" | "Edges",
+  weekStartDate?: string
+): Promise<GoalContainer[]> {
+  // Get all primary goals for this discipline
+  let primaryGoals = await progressTrackerDB.goals
+    .where('discipline')
+    .equals(discipline)
+    .and(g => g.type === 'primary' && !g.archivedAt)
+    .toArray();
+
+  // Filter by weekStartDate if provided
+  if (weekStartDate) {
+    primaryGoals = primaryGoals.filter(g => g.weekStartDate === weekStartDate || !g.weekStartDate);
+  }
+  // If no weekStartDate provided, return ALL active containers (current + future weeks)
+
+  // Build containers
+  const containers: GoalContainer[] = [];
+  for (const primaryGoal of primaryGoals) {
+    // Get working goals for this container
+    const workingGoals = await progressTrackerDB.goals
+      .where('containerId')
+      .equals(primaryGoal.id)
+      .and(g => !g.archivedAt)
+      .toArray();
+
+    containers.push(buildGoalContainer(primaryGoal, workingGoals));
+  }
+
+  // Sort by creation date (newest first)
+  return containers.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+// Get goal containers for a specific week
+export async function getGoalContainersForWeek(weekStartDate: string): Promise<GoalContainer[]> {
+  const allContainers: GoalContainer[] = [];
+
+  for (const discipline of DISCIPLINES) {
+    const containers = await getGoalContainersByDiscipline(discipline, weekStartDate);
+    allContainers.push(...containers);
+  }
+
+  return allContainers;
+}
+
+// Create a new goal container
+export async function createGoalContainer(
+  discipline: "Spins" | "Jumps" | "Edges",
+  primaryGoalContent: string,
+  workingGoalContents: string[] = [],
+  weekStartDate?: string
+): Promise<GoalContainer> {
+  // Validate: Max 3 containers per discipline
+  const existingContainers = await getGoalContainersByDiscipline(discipline);
+  if (existingContainers.length >= 3) {
+    throw new Error(`Maximum 3 goal containers per discipline. ${discipline} already has ${existingContainers.length} containers.`);
+  }
+
+  // Validate: Max 2 working goals
+  if (workingGoalContents.length > 2) {
+    throw new Error('Maximum 2 working goals per container.');
+  }
+
+  // Create primary goal (containerId === id)
+  const primaryGoalId = generateUUID();
+  const primaryGoal: Goal = {
+    id: primaryGoalId,
+    discipline,
+    type: 'primary',
+    content: primaryGoalContent.trim(),
+    containerId: primaryGoalId, // Primary goal's containerId is its own id
+    createdAt: Date.now(),
+    weekStartDate,
+  };
+
+  await progressTrackerDB.goals.add(primaryGoal);
+
+  // Create working goals
+  const workingGoals: Goal[] = [];
+  for (const content of workingGoalContents) {
+    if (content.trim()) {
+      const workingGoal: Goal = {
+        id: generateUUID(),
+        discipline,
+        type: 'working',
+        content: content.trim(),
+        containerId: primaryGoalId, // Working goals reference the primary goal's id
+        createdAt: Date.now(),
+        weekStartDate,
+      };
+      await progressTrackerDB.goals.add(workingGoal);
+      workingGoals.push(workingGoal);
+    }
+  }
+
+  return buildGoalContainer(primaryGoal, workingGoals);
+}
+
+// Add a working goal to an existing container
+export async function addWorkingGoalToContainer(
+  containerId: string,
+  workingGoalContent: string
+): Promise<Goal> {
+  // Get the primary goal to validate container exists
+  const primaryGoal = await progressTrackerDB.goals.get(containerId);
+  if (!primaryGoal || primaryGoal.type !== 'primary' || primaryGoal.archivedAt) {
+    throw new Error(`Container ${containerId} not found or archived.`);
+  }
+
+  // Validate: Max 2 working goals
+  const existingWorkingGoals = await progressTrackerDB.goals
+    .where('containerId')
+    .equals(containerId)
+    .and(g => !g.archivedAt)
+    .toArray();
+
+  if (existingWorkingGoals.length >= 2) {
+    throw new Error('Maximum 2 working goals per container.');
+  }
+
+  // Create working goal
+  const workingGoal: Goal = {
+    id: generateUUID(),
+    discipline: primaryGoal.discipline,
+    type: 'working',
+    content: workingGoalContent.trim(),
+    containerId: containerId,
+    createdAt: Date.now(),
+    weekStartDate: primaryGoal.weekStartDate,
+  };
+
+  await progressTrackerDB.goals.add(workingGoal);
+  return workingGoal;
+}
+
+// Remove a working goal from a container
+export async function removeWorkingGoalFromContainer(workingGoalId: string): Promise<void> {
+  await deleteGoal(workingGoalId);
+}
+
+// Delete an entire goal container (primary + all working goals)
+export async function deleteGoalContainer(containerId: string): Promise<void> {
+  // Delete primary goal
+  await deleteGoal(containerId);
+
+  // Delete all working goals in this container
+  const workingGoals = await progressTrackerDB.goals
+    .where('containerId')
+    .equals(containerId)
+    .toArray();
+
+  for (const goal of workingGoals) {
+    await deleteGoal(goal.id);
+  }
+}
+
+// Validation functions
+export async function canCreateContainer(discipline: "Spins" | "Jumps" | "Edges"): Promise<boolean> {
+  const containers = await getGoalContainersByDiscipline(discipline);
+  return containers.length < 3;
+}
+
+export async function canAddWorkingGoal(containerId: string): Promise<boolean> {
+  const workingGoals = await progressTrackerDB.goals
+    .where('containerId')
+    .equals(containerId)
+    .and(g => !g.archivedAt)
+    .toArray();
+
+  return workingGoals.length < 2;
+}
+
+// Migration: Convert existing goals to goal containers
+// This creates containers from existing primary goals and assigns working goals to the nearest primary goal
+export async function migrateGoalsToContainers(): Promise<void> {
+
+  // Get all active primary goals grouped by discipline
+  const allPrimaryGoals = await getActiveGoals(undefined, 'primary');
+  const allWorkingGoals = await getActiveGoals(undefined, 'working');
+
+  // Group by discipline
+  const primaryByDiscipline: Record<string, Goal[]> = {
+    Spins: [],
+    Jumps: [],
+    Edges: [],
+  };
+  const workingByDiscipline: Record<string, Goal[]> = {
+    Spins: [],
+    Jumps: [],
+    Edges: [],
+  };
+
+  allPrimaryGoals.forEach(goal => {
+    primaryByDiscipline[goal.discipline].push(goal);
+  });
+
+  allWorkingGoals.forEach(goal => {
+    workingByDiscipline[goal.discipline].push(goal);
+  });
+
+  let containersCreated = 0;
+  let goalsUpdated = 0;
+
+  // Process each discipline
+  for (const discipline of DISCIPLINES) {
+    const primaryGoals = primaryByDiscipline[discipline].sort((a, b) => a.createdAt - b.createdAt); // Oldest first
+    const workingGoals = workingByDiscipline[discipline].sort((a, b) => a.createdAt - b.createdAt);
+
+    // Limit to 3 primary goals (max containers per discipline)
+    const primaryGoalsToProcess = primaryGoals.slice(0, 3);
+    const remainingPrimaryGoals = primaryGoals.slice(3);
+
+    // Update primary goals: set containerId === id
+    for (const primaryGoal of primaryGoalsToProcess) {
+      if (!primaryGoal.containerId || primaryGoal.containerId !== primaryGoal.id) {
+        await updateGoal(primaryGoal.id, { containerId: primaryGoal.id });
+        goalsUpdated++;
+        containersCreated++;
+      }
+    }
+
+    // Archive remaining primary goals if there are more than 3
+    for (const primaryGoal of remainingPrimaryGoals) {
+      await archiveGoal(primaryGoal.id);
+    }
+
+    // Assign working goals to primary goals
+    // Distribute working goals evenly across primary goals (max 2 per container)
+    let workingGoalIndex = 0;
+    for (const primaryGoal of primaryGoalsToProcess) {
+      // Get existing working goals for this container
+      const existingWorking = await progressTrackerDB.goals
+        .where('containerId')
+        .equals(primaryGoal.id)
+        .and(g => !g.archivedAt)
+        .toArray();
+
+      const slotsAvailable = 2 - existingWorking.length;
+
+      // Assign up to 2 working goals to this primary goal
+      for (let i = 0; i < slotsAvailable && workingGoalIndex < workingGoals.length; i++) {
+        const workingGoal = workingGoals[workingGoalIndex];
+        if (!workingGoal.containerId) {
+          await updateGoal(workingGoal.id, { containerId: primaryGoal.id });
+          goalsUpdated++;
+        }
+        workingGoalIndex++;
+      }
+    }
+
+    // Archive any remaining unassigned working goals
+    for (let i = workingGoalIndex; i < workingGoals.length; i++) {
+      const workingGoal = workingGoals[i];
+      if (!workingGoal.containerId) {
+        await archiveGoal(workingGoal.id);
+      }
+    }
+  }
+}
+
+// Helper function to delete goals by content pattern (for cleanup)
+export async function deleteGoalsByContentPattern(
+  pattern: string,
+  discipline?: "Spins" | "Jumps" | "Edges"
+): Promise<number> {
+  let goals = await progressTrackerDB.goals.toArray();
+
+  // Filter by discipline if provided
+  if (discipline) {
+    goals = goals.filter(g => g.discipline === discipline);
+  }
+
+  // Filter by content pattern (case-insensitive partial match)
+  const matchingGoals = goals.filter(g =>
+    g.content.toLowerCase().includes(pattern.toLowerCase())
+  );
+
+  // Delete matching goals
+  for (const goal of matchingGoals) {
+    await deleteGoal(goal.id);
+  }
+
+  return matchingGoals.length;
+}
+
+// Quick cleanup function for specific test goals
+export async function cleanupMooGoals(): Promise<void> {
+  const patterns = ['moo', 'more some less'];
+
+  for (const pattern of patterns) {
+    await deleteGoalsByContentPattern(pattern, 'Spins');
   }
 }
 

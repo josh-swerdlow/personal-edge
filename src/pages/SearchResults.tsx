@@ -5,6 +5,7 @@ import { getAllDecks } from '../db/training-coach/operations';
 import { Deck } from '../db/training-coach/types';
 import PageLayout from '../components/PageLayout';
 import LiquidGlassCard from '../components/LiquidGlassCard';
+import { logger } from '../utils/logger';
 
 export default function SearchResults() {
   const [searchParams] = useSearchParams();
@@ -68,7 +69,7 @@ export default function SearchResults() {
 
       setResults(searchResults);
     } catch (error) {
-      console.error('Search error:', error);
+      logger.error('Search error:', error);
     } finally {
       setLoading(false);
     }

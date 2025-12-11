@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS goals (
     discipline TEXT NOT NULL CHECK (discipline IN ('Spins', 'Jumps', 'Edges')),
     type TEXT NOT NULL CHECK (type IN ('primary', 'working')),
     content TEXT NOT NULL,
+    container_id TEXT,            -- For primary goals: container_id === id. For working goals: references primary goal id
     created_at BIGINT NOT NULL,  -- Unix timestamp
     archived_at BIGINT,          -- Unix timestamp (nullable)
     created_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -28,6 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_goals_type ON goals(type);
 CREATE INDEX IF NOT EXISTS idx_goals_created_at ON goals(created_at);
 CREATE INDEX IF NOT EXISTS idx_goals_archived_at ON goals(archived_at) WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_goals_discipline_type_active ON goals(discipline, type) WHERE archived_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_goals_container_id ON goals(container_id) WHERE container_id IS NOT NULL;
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

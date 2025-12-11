@@ -253,7 +253,7 @@ export default function DeckList() {
                       </span>
                     )}
                     <p className="text-sm text-white/70">
-                      Updated: {new Date(deck.updatedAt).toLocaleDateString()}
+                      Updated: {deck.updatedAt ? new Date(deck.updatedAt).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
                 </div>

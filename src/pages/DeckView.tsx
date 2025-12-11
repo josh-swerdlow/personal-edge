@@ -8,6 +8,7 @@ import DeckCardView from '../components/DeckCardView';
 import PageLayout from '../components/PageLayout';
 import DeckViewSettingsBar from '../components/DeckViewSettingsBar';
 import { similarity } from '../utils/fuzzyMatch';
+import { logger } from '../utils/logger';
 
 export default function DeckView() {
   const { deckId } = useParams<{ deckId: string }>();
@@ -37,21 +38,21 @@ export default function DeckView() {
 
   const loadDeck = useCallback(async () => {
     if (!deckId) return;
-    console.log('[DeckView] Loading deck:', deckId);
+    logger.debug('[DeckView] Loading deck:', deckId);
     try {
       const deckData = await getDeckWithSections(deckId);
       if (deckData) {
-        console.log('[DeckView] Deck loaded:', {
+        logger.debug('[DeckView] Deck loaded:', {
           id: deckData.id,
           name: deckData.name,
           sectionsCount: deckData.sections?.length || 0
         });
         setDeck(deckData);
       } else {
-        console.error('[DeckView] Deck not found:', deckId);
+        logger.error('[DeckView] Deck not found:', deckId);
       }
     } catch (error) {
-      console.error('[DeckView] Error loading deck:', error);
+      logger.error('[DeckView] Error loading deck:', error);
     }
   }, [deckId]);
 
@@ -234,27 +235,61 @@ export default function DeckView() {
         });
       }
 
-      // Apply filter mode
-      if (filterMode === 'recent') {
-        filteredCards = [...filteredCards].sort((a, b) => b.createdAt - a.createdAt);
-      } else if (filterMode === 'helpful') {
+      // Section-specific sorting
+      if (section.title === 'Reminders') {
+        // Order Reminders by Part of Element sequence
+        const sequenceOrder = ['set', 'load', 'jump', 'hook', 'snap', 'hold', 'exit'];
         filteredCards = [...filteredCards].sort((a, b) => {
-          if (b.helpfulnessScore !== a.helpfulnessScore) {
-            return b.helpfulnessScore - a.helpfulnessScore;
+          const aSeq = a.tags?.find(tag => sequenceOrder.includes(tag)) || '';
+          const bSeq = b.tags?.find(tag => sequenceOrder.includes(tag)) || '';
+          const aIndex = sequenceOrder.indexOf(aSeq);
+          const bIndex = sequenceOrder.indexOf(bSeq);
+          // If both have sequence tags, sort by order
+          if (aIndex !== -1 && bIndex !== -1) {
+            return aIndex - bIndex;
           }
-          return (b.lastUpvotedAt || b.createdAt) - (a.lastUpvotedAt || a.createdAt);
+          // If only one has a sequence tag, prioritize it
+          if (aIndex !== -1) return -1;
+          if (bIndex !== -1) return 1;
+          // If neither has a sequence tag, maintain original order
+          return 0;
         });
-      } else if (filterMode === 'priority') {
-        // Filter to priority cards, but exclude Troubleshooting and Theory sections
-        filteredCards = filteredCards.filter(c => {
-          const isRestricted = section.title === 'Troubleshooting' || section.title === 'Theory';
-          return c.priority && !isRestricted;
-        }).sort((a, b) => {
-          if (b.helpfulnessScore !== a.helpfulnessScore) {
-            return b.helpfulnessScore - a.helpfulnessScore;
+      } else if (section.title === 'Troubleshooting') {
+        // Order Troubleshooting by priority first, then last modified (most recent first)
+        filteredCards = [...filteredCards].sort((a, b) => {
+          // Priority cards first
+          if (a.priority !== b.priority) {
+            return a.priority ? -1 : 1;
           }
-          return (b.lastUpvotedAt || b.createdAt) - (a.lastUpvotedAt || a.createdAt);
+          // Then by last modified (most recent first)
+          // Use updatedAt if available, otherwise createdAt
+          const aModified = a.lastUpvotedAt || a.createdAt;
+          const bModified = b.lastUpvotedAt || b.createdAt;
+          return bModified - aModified;
         });
+      } else {
+        // Apply filter mode for other sections
+        if (filterMode === 'recent') {
+          filteredCards = [...filteredCards].sort((a, b) => b.createdAt - a.createdAt);
+        } else if (filterMode === 'helpful') {
+          filteredCards = [...filteredCards].sort((a, b) => {
+            if (b.helpfulnessScore !== a.helpfulnessScore) {
+              return b.helpfulnessScore - a.helpfulnessScore;
+            }
+            return (b.lastUpvotedAt || b.createdAt) - (a.lastUpvotedAt || a.createdAt);
+          });
+        } else if (filterMode === 'priority') {
+          // Filter to priority cards, but exclude Troubleshooting and Theory sections
+          filteredCards = filteredCards.filter(c => {
+            const isRestricted = section.title === 'Troubleshooting' || section.title === 'Theory';
+            return c.priority && !isRestricted;
+          }).sort((a, b) => {
+            if (b.helpfulnessScore !== a.helpfulnessScore) {
+              return b.helpfulnessScore - a.helpfulnessScore;
+            }
+            return (b.lastUpvotedAt || b.createdAt) - (a.lastUpvotedAt || a.createdAt);
+          });
+        }
       }
 
       return {

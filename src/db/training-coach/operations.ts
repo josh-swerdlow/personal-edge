@@ -7,6 +7,7 @@ import {
 } from './neon-operations';
 import { syncDeckFromNeon } from '../sync/syncFromNeon';
 import { NetworkError, withRetry } from '../../utils/errorHandler';
+import { logger } from '../../utils/logger';
 
 // Simple UUID v4 generator for browser
 function generateUUID(): string {
@@ -150,14 +151,14 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
 }
 
 export async function getDeckWithSections(id: string): Promise<Deck | undefined> {
-  console.log('[getDeckWithSections] Fetching deck:', id);
+  logger.verbose('[getDeckWithSections] Fetching deck:', id);
   const deck = await trainingCoachDB.decks.get(id);
   if (!deck) {
-    console.log('[getDeckWithSections] Deck not found:', id);
+    logger.debug('[getDeckWithSections] Deck not found:', id);
     return undefined;
   }
 
-  console.log('[getDeckWithSections] Deck found:', {
+  logger.debug('[getDeckWithSections] Deck found:', {
     id: deck.id,
     name: deck.name,
     hasSections: !!deck.sections,
@@ -167,7 +168,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
 
   // Ensure deck has sections (migrate old decks)
   if (!deck.sections || deck.sections.length === 0) {
-    console.log('[getDeckWithSections] Deck missing sections, creating default sections');
+    logger.debug('[getDeckWithSections] Deck missing sections, creating default sections');
     const { createDefaultSections } = await import('../../utils/sections');
     const updatedDeck = {
       ...deck,
@@ -175,7 +176,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
       updatedAt: Date.now(),
     };
     await trainingCoachDB.decks.update(id, updatedDeck);
-    console.log('[getDeckWithSections] Deck migrated with default sections');
+    logger.debug('[getDeckWithSections] Deck migrated with default sections');
     return updatedDeck;
   }
 
@@ -199,7 +200,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
     const hasCards = !!section.cards;
 
     if (hasContentList && !hasCards) {
-      console.log(`[getDeckWithSections] Migrating section "${section.title}" from contentList to cards`);
+      logger.debug(`[getDeckWithSections] Migrating section "${section.title}" from contentList to cards`);
       needsMigration = true;
       // Migrate from old contentList to cards
       const oldContent = legacySection.contentList || [];
@@ -220,7 +221,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
     }
 
     if (!hasCards) {
-      console.log(`[getDeckWithSections] Section "${section.title}" missing cards array, initializing empty`);
+      logger.debug(`[getDeckWithSections] Section "${section.title}" missing cards array, initializing empty`);
       needsMigration = true;
       return {
         ...section,
@@ -285,7 +286,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
 
   // Update if migration was needed
   if (needsMigration) {
-    console.log('[getDeckWithSections] Updating deck with migrated sections');
+    logger.debug('[getDeckWithSections] Updating deck with migrated sections');
     const updatedDeck = {
       ...deck,
       sections: migratedSections,
@@ -295,7 +296,7 @@ export async function getDeckWithSections(id: string): Promise<Deck | undefined>
     return updatedDeck;
   }
 
-  console.log('[getDeckWithSections] Deck is up to date, returning as-is');
+  logger.verbose('[getDeckWithSections] Deck is up to date, returning as-is');
   return deck;
 }
 
@@ -347,7 +348,7 @@ export async function addCardToSection(
   const updatedSections = (deck.sections || []).map(section => {
     if (section.id === sectionId) {
       const cards = section.cards || [];
-      console.log('[addCardToSection] Adding card to section:', {
+      logger.verbose('[addCardToSection] Adding card to section:', {
         sectionId,
         sectionTitle: section.title,
         currentCardsCount: cards.length,
@@ -377,7 +378,7 @@ export async function updateCard(
   const updatedSections = (deck.sections || []).map(section => {
     if (section.id === sectionId) {
       const cards = section.cards || [];
-      console.log('[updateCard] Updating card in section:', {
+      logger.verbose('[updateCard] Updating card in section:', {
         sectionId,
         sectionTitle: section.title,
         cardId,
@@ -412,7 +413,7 @@ export async function updateCard(
 
   if (!updatedCard) throw new Error(`Card ${cardId} not found`);
 
-  console.log('[updateCard] Card updated successfully:', {
+  logger.verbose('[updateCard] Card updated successfully:', {
     cardId,
     sectionId,
     sectionTitle: section.title
@@ -432,7 +433,7 @@ export async function deleteCard(
   const updatedSections = (deck.sections || []).map(section => {
     if (section.id === sectionId) {
       const cards = section.cards || [];
-      console.log('[deleteCard] Deleting card from section:', {
+      logger.verbose('[deleteCard] Deleting card from section:', {
         sectionId,
         sectionTitle: section.title,
         cardId,
@@ -467,7 +468,7 @@ export async function moveCard(
   const card = cards.find(c => c.id === cardId);
   if (!card) throw new Error(`Card ${cardId} not found`);
 
-  console.log('[moveCard] Moving card:', {
+  logger.verbose('[moveCard] Moving card:', {
     cardId,
     fromSectionId,
     toSectionId,
@@ -502,21 +503,21 @@ export async function getAllCards(): Promise<Array<Card & { deckId: string; sect
   const allDecks = await trainingCoachDB.decks.toArray();
   const allCards: Array<Card & { deckId: string; sectionTitle?: string }> = [];
 
-  console.log('[getAllCards] Processing decks:', allDecks.length);
+  logger.debug('[getAllCards] Processing decks:', allDecks.length);
 
   for (const deck of allDecks) {
     const sections = deck.sections || [];
-    console.log(`[getAllCards] Deck "${deck.name}" has ${sections.length} sections`);
+    logger.verbose(`[getAllCards] Deck "${deck.name}" has ${sections.length} sections`);
 
     for (const section of sections) {
       // Skip Core Reminders section - it contains duplicates of cards from other sections
       if (section.title === 'Core Reminders') {
-        console.log(`[getAllCards] Skipping Core Reminders section (contains duplicates)`);
+        logger.verbose(`[getAllCards] Skipping Core Reminders section (contains duplicates)`);
         continue;
       }
 
       const cards = section.cards || [];
-      console.log(`[getAllCards] Section "${section.title}" has ${cards.length} cards`);
+      logger.verbose(`[getAllCards] Section "${section.title}" has ${cards.length} cards`);
 
       for (const card of cards) {
         // Unpack content if it's stored as JSON with a 'text' property
@@ -560,7 +561,7 @@ export async function getAllCards(): Promise<Array<Card & { deckId: string; sect
     }
   }
 
-  console.log('[getAllCards] Total cards found:', allCards.length);
+  logger.info('[getAllCards] Total cards found:', allCards.length);
   return allCards;
 }
 
@@ -577,6 +578,104 @@ export async function migrateDeckAnimals(): Promise<void> {
     }
   }
 
-  console.log(`[migrateDeckAnimals] Migrated ${migrated} deck(s) with animal assignments`);
+  logger.debug(`[migrateDeckAnimals] Migrated ${migrated} deck(s) with animal assignments`);
+}
+
+// Migration: Add Exercises section to existing decks that don't have it
+export async function migrateAddExercisesSection(): Promise<void> {
+  const decks = await trainingCoachDB.decks.toArray();
+  let migrated = 0;
+
+  for (const deck of decks) {
+    const hasExercises = deck.sections?.some(s => s.title === 'Exercises');
+    if (!hasExercises) {
+      const exercisesSection: Section = {
+        id: generateUUID(),
+        title: 'Exercises',
+        cards: [],
+      };
+      const updatedSections = [...(deck.sections || []), exercisesSection];
+      await updateDeck(deck.id, {
+        sections: updatedSections,
+      });
+      migrated++;
+          logger.debug(`[migrateAddExercisesSection] Added Exercises section to deck: ${deck.name}`);
+    }
+  }
+
+  logger.debug(`[migrateAddExercisesSection] Migrated ${migrated} deck(s) with Exercises section`);
+}
+
+// Migration: Convert existing Troubleshooting single-string entries to multi-field format
+export async function migrateTroubleshootingContent(): Promise<void> {
+  const decks = await trainingCoachDB.decks.toArray();
+  let migrated = 0;
+
+  // Parse troubleshooting content into structured parts
+  const parseTroubleshootingContent = (content: string) => {
+    const parts: { feeling?: string; issue?: string; solution?: string } = {};
+    const lines = content.split('\n\n');
+
+    for (const line of lines) {
+      if (line.startsWith('Feeling:')) {
+        parts.feeling = line.replace(/^Feeling:\s*/, '');
+      } else if (line.startsWith('Issue:')) {
+        parts.issue = line.replace(/^Issue:\s*/, '');
+      } else if (line.startsWith('Solution:')) {
+        parts.solution = line.replace(/^Solution:\s*/, '');
+      }
+    }
+
+    return parts;
+  };
+
+  // Check if content is already in the new format
+  const isAlreadyFormatted = (content: string): boolean => {
+    const parsed = parseTroubleshootingContent(content);
+    return !!(parsed.feeling && parsed.issue && parsed.solution);
+  };
+
+  for (const deck of decks) {
+    const sections = deck.sections || [];
+    let deckUpdated = false;
+
+    for (const section of sections) {
+      if (section.title === 'Troubleshooting') {
+        const cards = section.cards || [];
+        const updatedCards = cards.map(card => {
+          // Skip if already formatted
+          if (isAlreadyFormatted(card.content)) {
+            return card;
+          }
+
+          // Try to parse existing content
+          const parsed = parseTroubleshootingContent(card.content);
+
+          // If we have at least one field, format it properly
+          if (parsed.feeling || parsed.issue || parsed.solution) {
+            const formatted = `Feeling: ${parsed.feeling || ''}\n\nIssue: ${parsed.issue || ''}\n\nSolution: ${parsed.solution || ''}`;
+            migrated++;
+            deckUpdated = true;
+            return { ...card, content: formatted };
+          }
+
+          // If content doesn't match expected format, leave it as-is
+          return card;
+        });
+
+        if (deckUpdated) {
+          const updatedSections = sections.map(s =>
+            s.id === section.id ? { ...s, cards: updatedCards } : s
+          );
+          await updateDeck(deck.id, {
+            sections: updatedSections,
+          });
+          logger.debug(`[migrateTroubleshootingContent] Migrated ${updatedCards.length} Troubleshooting card(s) in deck: ${deck.name}`);
+        }
+      }
+    }
+  }
+
+  logger.debug(`[migrateTroubleshootingContent] Migrated ${migrated} Troubleshooting card(s) total`);
 }
 

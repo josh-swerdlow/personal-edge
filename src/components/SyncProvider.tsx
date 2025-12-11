@@ -4,6 +4,7 @@ import { useState, useEffect, createContext, useContext, ReactNode } from 'react
 import { syncAllDecksFromNeon, SyncResult } from '../db/sync/syncFromNeon';
 import { getErrorMessage, isNetworkError } from '../utils/errorHandler';
 import SyncErrorModal from './SyncErrorModal';
+import { logger } from '../utils/logger';
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -40,11 +41,11 @@ export default function SyncProvider({ children }: SyncProviderProps) {
         throw new Error(result.error || 'Sync failed');
       }
 
-      console.log(`[SyncProvider] Sync result: ${result.decksSynced} decks synced, wasOutOfSync: ${result.wasOutOfSync}`);
+      logger.info(`[SyncProvider] Sync result: ${result.decksSynced} decks synced, wasOutOfSync: ${result.wasOutOfSync}`);
 
       // Only reload if we actually synced data (wasOutOfSync = true) and got decks
       if (result.wasOutOfSync && result.decksSynced > 0) {
-        console.log('[SyncProvider] Data was out of sync and has been updated, reloading page to refresh all components...');
+        logger.info('[SyncProvider] Data was out of sync and has been updated, reloading page to refresh all components...');
         // Small delay to ensure state is saved before reload
         setTimeout(() => {
           window.location.reload();
@@ -52,11 +53,11 @@ export default function SyncProvider({ children }: SyncProviderProps) {
       }
 
       return result;
-    } catch (error: any) {
-      const errorMessage = getErrorMessage(error);
-      console.error('[SyncProvider] Sync error:', errorMessage);
-      setSyncError(errorMessage);
-      throw error;
+      } catch (error: any) {
+        const errorMessage = getErrorMessage(error);
+        logger.error('[SyncProvider] Sync error:', errorMessage);
+        setSyncError(errorMessage);
+        throw error;
     } finally {
       setIsSyncing(false);
     }
@@ -81,30 +82,30 @@ export default function SyncProvider({ children }: SyncProviderProps) {
         // In local development, check if VITE_API_URL is configured
         const apiUrl = import.meta.env.VITE_API_URL;
         if (!import.meta.env.PROD && !apiUrl) {
-          console.log('[SyncProvider] API not configured, skipping sync');
+          logger.debug('[SyncProvider] API not configured, skipping sync');
           setHasInitialized(true);
           return;
         }
 
         // Check sync status first - only sync if IndexedDB is out of sync
-        console.log('[SyncProvider] Checking if sync is needed...');
+        logger.verbose('[SyncProvider] Checking if sync is needed...');
         const { checkSyncStatus } = await import('../db/sync/syncFromNeon');
         const syncStatus = await checkSyncStatus();
 
         if (!syncStatus.needsSync) {
-          console.log(`[SyncProvider] No sync needed: ${syncStatus.reason}`);
+          logger.verbose(`[SyncProvider] No sync needed: ${syncStatus.reason}`);
           setHasInitialized(true);
           return;
         }
 
         // Sync is needed - perform the sync
-        console.log(`[SyncProvider] Sync needed: ${syncStatus.reason}`);
-        console.log('[SyncProvider] Starting sync from Neon...');
+        logger.info(`[SyncProvider] Sync needed: ${syncStatus.reason}`);
+        logger.info('[SyncProvider] Starting sync from Neon...');
         await performSync();
 
         setHasInitialized(true);
       } catch (error: any) {
-        console.error('[SyncProvider] Initial sync failed:', error);
+        logger.error('[SyncProvider] Initial sync failed:', error);
         setHasInitialized(true);
 
         // Only show error modal if it's a network error

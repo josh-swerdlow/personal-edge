@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
-import { AppData, Goal } from '../db/progress-tracker/types';
+import { AppData, Goal, GoalContainer } from '../db/progress-tracker/types';
 import {
   getAppData,
   getActiveGoals,
   getCurrentFocus,
   getWeekInCycle,
   getDaysUntilNextCycle,
+  getGoalContainersByDiscipline,
+  getWeekStartDate,
 } from '../db/progress-tracker/operations';
+import { logger } from '../utils/logger';
 
 export function useProgressTracker() {
   const [appData, setAppData] = useState<AppData | null>(null);
@@ -22,7 +25,7 @@ export function useProgressTracker() {
         const allGoals = await getActiveGoals();
         setGoals(allGoals);
       } catch (error) {
-        console.error('Failed to load progress tracker data:', error);
+        logger.error('Failed to load progress tracker data:', error);
       } finally {
         setLoading(false);
       }
@@ -33,6 +36,16 @@ export function useProgressTracker() {
   const refreshGoals = async () => {
     const allGoals = await getActiveGoals();
     setGoals(allGoals);
+    // Also refresh containers
+    if (appData) {
+      const currentWeekStart = getWeekStartDate(appData.startDate);
+      const containers = {
+        Spins: await getGoalContainersByDiscipline('Spins', currentWeekStart),
+        Jumps: await getGoalContainersByDiscipline('Jumps', currentWeekStart),
+        Edges: await getGoalContainersByDiscipline('Edges', currentWeekStart),
+      };
+      setContainersByDiscipline(containers);
+    }
   };
 
   const refreshAppData = async () => {
@@ -49,8 +62,51 @@ export function useProgressTracker() {
   );
 
   const workingGoals = goals.filter(
-    g => g.discipline !== currentFocus && g.type === 'working'
+    g => g.type === 'working'
   );
+
+  // Load goal containers by discipline
+  const [containersByDiscipline, setContainersByDiscipline] = useState<{
+    Spins: GoalContainer[];
+    Jumps: GoalContainer[];
+    Edges: GoalContainer[];
+  }>({
+    Spins: [],
+    Jumps: [],
+    Edges: [],
+  });
+
+  useEffect(() => {
+    async function loadContainers() {
+      if (!appData) return;
+
+      // Load containers for current week AND future weeks (no weekStartDate filter for future)
+      // Get all active containers regardless of week
+      const containers = {
+        Spins: await getGoalContainersByDiscipline('Spins'), // No weekStartDate = all active containers
+        Jumps: await getGoalContainersByDiscipline('Jumps'),
+        Edges: await getGoalContainersByDiscipline('Edges'),
+      };
+      setContainersByDiscipline(containers);
+    }
+    loadContainers();
+  }, [appData]);
+
+  // Also refresh containers when goals change
+  useEffect(() => {
+    async function refreshContainers() {
+      if (!appData) return;
+
+      // Load all active containers (current + future weeks)
+      const containers = {
+        Spins: await getGoalContainersByDiscipline('Spins'),
+        Jumps: await getGoalContainersByDiscipline('Jumps'),
+        Edges: await getGoalContainersByDiscipline('Edges'),
+      };
+      setContainersByDiscipline(containers);
+    }
+    refreshContainers();
+  }, [appData, goals]);
 
   return {
     appData,
@@ -61,6 +117,7 @@ export function useProgressTracker() {
     daysUntilNext,
     primaryGoals,
     workingGoals,
+    containersByDiscipline,
     refreshGoals,
     refreshAppData,
   };

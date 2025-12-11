@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Goal } from '../db/progress-tracker/types';
-import { getAppData, getWeekStartDate, updateGoal, createGoal, deleteGoal } from '../db/progress-tracker/operations';
+import { Goal, GoalContainer } from '../db/progress-tracker/types';
+import {
+  getAppData,
+  getWeekStartDate,
+  updateGoal,
+  createGoalContainer,
+  getGoalContainersByDiscipline,
+  addWorkingGoalToContainer,
+  deleteGoalContainer,
+  canCreateContainer,
+  canAddWorkingGoal,
+  deleteGoal
+} from '../db/progress-tracker/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
-import { FaEdit, FaTrash } from 'react-icons/fa';
+import { FaEdit, FaTrash, FaPlus } from 'react-icons/fa';
 import { DISCIPLINES, getDisciplineBadgeClasses, getDisciplineDisplay } from '../utils/disciplines';
 import LiquidGlassCard from './LiquidGlassCard';
+import { logger } from '../utils/logger';
 
 interface UnifiedWeekViewProps {
   onGoalUpdate: () => void;
@@ -13,8 +25,7 @@ interface UnifiedWeekViewProps {
 interface WeekData {
   weekStartDate: string;
   discipline: "Spins" | "Jumps" | "Edges";
-  primaryGoals: Goal[];
-  workingGoals: Goal[];
+  containers: GoalContainer[];
 }
 
 function formatWeekDate(dateStr: string): string {
@@ -50,28 +61,16 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
       const cyclePosition = weekNumber % data.cycleLength;
       const discipline = disciplines[cyclePosition];
 
-      // Load goals for current week (with and without weekStartDate)
-      const goalsWithWeek = await progressTrackerDB.goals
-        .where('weekStartDate')
-        .equals(currentWeekStart)
-        .toArray();
-
-      const goalsWithoutWeek = await progressTrackerDB.goals
-        .filter(g => !g.weekStartDate && !g.archivedAt)
-        .toArray();
-
-      const allGoals = [...goalsWithWeek, ...goalsWithoutWeek];
-      const primaryGoals = allGoals.filter(g => g.type === 'primary' && !g.archivedAt);
-      const workingGoals = allGoals.filter(g => g.type === 'working' && !g.archivedAt);
+      // Load goal containers for current week
+      const containers = await getGoalContainersByDiscipline(discipline, currentWeekStart);
 
       setCurrentWeek({
         weekStartDate: currentWeekStart,
         discipline,
-        primaryGoals,
-        workingGoals,
+        containers,
       });
     } catch (error) {
-      console.error('Failed to load current week:', error);
+      logger.error('Failed to load current week:', error);
     } finally {
       setLoading(false);
     }
@@ -100,25 +99,19 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         const cyclePosition = weekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
-        const allGoals = await progressTrackerDB.goals
-          .where('weekStartDate')
-          .equals(weekStartStr)
-          .toArray();
-
-        const primaryGoals = allGoals.filter(g => g.type === 'primary' && !g.archivedAt);
-        const workingGoals = allGoals.filter(g => g.type === 'working' && !g.archivedAt);
+        // Load goal containers for this week
+        const containers = await getGoalContainersByDiscipline(discipline, weekStartStr);
 
         future.push({
           weekStartDate: weekStartStr,
           discipline,
-          primaryGoals,
-          workingGoals,
+          containers,
         });
       }
 
       setFutureWeeks(future);
     } catch (error) {
-      console.error('Failed to load future weeks:', error);
+      logger.error('Failed to load future weeks:', error);
     } finally {
       setLoading(false);
     }
@@ -143,41 +136,55 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         const cyclePosition = weekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
-        const allGoals = await progressTrackerDB.goals
-          .where('weekStartDate')
-          .equals(weekStartStr)
-          .toArray();
-
-        const primaryGoals = allGoals.filter(g => g.type === 'primary');
-        const workingGoals = allGoals.filter(g => g.type === 'working');
+        // Load goal containers for this week
+        const containers = await getGoalContainersByDiscipline(discipline, weekStartStr);
 
         past.push({
           weekStartDate: weekStartStr,
           discipline,
-          primaryGoals,
-          workingGoals,
+          containers,
         });
       }
 
       setPastWeeks(past.reverse());
     } catch (error) {
-      console.error('Failed to load past weeks:', error);
+      logger.error('Failed to load past weeks:', error);
     } finally {
       setLoading(false);
     }
   }
 
   async function handleGoalEdit(goal: Goal) {
-    setEditingGoal(goal);
-    setEditText(goal.content);
+    // Verify the goal exists and get fresh data
+    const freshGoal = await progressTrackerDB.goals.get(goal.id);
+    if (!freshGoal || freshGoal.archivedAt) {
+      logger.error('Cannot edit archived or non-existent goal:', goal.id);
+      return;
+    }
+    setEditingGoal(freshGoal);
+    setEditText(freshGoal.content);
   }
 
   async function handleGoalSave() {
     if (!editingGoal || !editText.trim()) return;
 
+    // Verify we're editing the correct goal type
+    const goalToUpdate = await progressTrackerDB.goals.get(editingGoal.id);
+    if (!goalToUpdate) {
+      logger.error('Goal not found for update:', editingGoal.id);
+      setEditingGoal(null);
+      setEditText('');
+      return;
+    }
+
+    // Update the goal
     await updateGoal(editingGoal.id, { content: editText.trim() });
+
+    // Clear editing state
     setEditingGoal(null);
     setEditText('');
+
+    // Reload data
     await loadCurrentWeek();
     if (showFuture) {
       await loadFutureWeeks(true);
@@ -188,9 +195,15 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     onGoalUpdate();
   }
 
-  async function handleGoalDelete(goalId: string) {
-    if (confirm('Are you sure you want to delete this goal?')) {
+  async function handleGoalDelete(goalId: string, isPrimary: boolean = false) {
+    if (confirm(isPrimary ? 'Are you sure you want to delete this goal container? This will delete the primary goal and all working goals.' : 'Are you sure you want to delete this goal?')) {
+      if (isPrimary) {
+        // Delete entire container
+        await deleteGoalContainer(goalId);
+      } else {
+        // Delete just the working goal
       await deleteGoal(goalId);
+      }
       await loadCurrentWeek();
       if (showFuture) {
         await loadFutureWeeks(true);
@@ -202,27 +215,36 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     }
   }
 
-  async function handleAddGoal(type: 'primary' | 'working', weekStartDate?: string, content?: string) {
+  async function handleCreateContainer(discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) {
+    if (!primaryContent || !primaryContent.trim()) return;
+
+    try {
+      // Explicitly pass empty array to ensure no working goals are created
+      await createGoalContainer(discipline, primaryContent.trim(), [], weekStartDate);
+      // Clear any editing state before reloading
+      setEditingGoal(null);
+      setEditText('');
+      await loadCurrentWeek();
+      if (showFuture) {
+        await loadFutureWeeks(true);
+      }
+      if (showPast) {
+        await loadPastWeeks(true);
+      }
+      onGoalUpdate();
+    } catch (error: any) {
+      alert(error.message || 'Failed to create goal container');
+    }
+  }
+
+  async function handleAddWorkingGoal(containerId: string, content: string) {
     if (!content || !content.trim()) return;
 
-    // Use the week's discipline if weekStartDate is provided, otherwise use currentWeek
-    let discipline: "Spins" | "Jumps" | "Edges" = currentWeek?.discipline || "Spins";
-
-    if (weekStartDate && appData) {
-      // Calculate discipline for the specified week
-      const daysFromStart = Math.floor((new Date(weekStartDate).getTime() - new Date(appData.startDate).getTime()) / (1000 * 60 * 60 * 24));
-      const weekNumber = Math.floor(daysFromStart / 7);
-      const cyclePosition = weekNumber % appData.cycleLength;
-      discipline = disciplines[cyclePosition];
-    }
-
-    await createGoal({
-      discipline,
-      type,
-      content: content.trim(),
-      weekStartDate,
-    });
-
+    try {
+      await addWorkingGoalToContainer(containerId, content.trim());
+      // Clear any editing state before reloading
+      setEditingGoal(null);
+      setEditText('');
     await loadCurrentWeek();
     if (showFuture) {
       await loadFutureWeeks(true);
@@ -231,6 +253,9 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
       await loadPastWeeks(true);
     }
     onGoalUpdate();
+    } catch (error: any) {
+      alert(error.message || 'Failed to add working goal');
+    }
   }
 
   if (loading && !currentWeek) {
@@ -259,7 +284,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
           setEditingGoal(null);
           setEditText('');
         }}
-        onAddGoal={handleAddGoal}
+        onCreateContainer={handleCreateContainer}
+        onAddWorkingGoal={handleAddWorkingGoal}
       />
 
       {/* Future Weeks */}
@@ -301,7 +327,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                     setEditingGoal(null);
                     setEditText('');
                   }}
-                  onAddGoal={handleAddGoal}
+                  onCreateContainer={handleCreateContainer}
+                  onAddWorkingGoal={handleAddWorkingGoal}
                 />
               ))
             )}
@@ -348,7 +375,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                     setEditingGoal(null);
                     setEditText('');
                   }}
-                  onAddGoal={handleAddGoal}
+                  onCreateContainer={handleCreateContainer}
+                  onAddWorkingGoal={handleAddWorkingGoal}
                 />
               ))
             )}
@@ -365,13 +393,14 @@ interface WeekCardProps {
   formatWeekDate: (d: string) => string;
   getDisciplineDisplay: (d: "Spins" | "Jumps" | "Edges") => string;
   onGoalEdit: (goal: Goal) => void;
-  onGoalDelete: (goalId: string) => void;
+  onGoalDelete: (goalId: string, isPrimary?: boolean) => void;
   editingGoal: Goal | null;
   editText: string;
   setEditText: (text: string) => void;
   onSave: () => void;
   onCancel: () => void;
-  onAddGoal: (type: 'primary' | 'working', weekStartDate?: string, content?: string) => void;
+  onCreateContainer: (discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) => void;
+  onAddWorkingGoal: (containerId: string, content: string) => void;
 }
 
 function WeekCard({
@@ -386,34 +415,31 @@ function WeekCard({
   setEditText,
   onSave,
   onCancel,
-  onAddGoal,
+  onCreateContainer,
+  onAddWorkingGoal,
 }: WeekCardProps) {
-  const [addingPrimary, setAddingPrimary] = useState(false);
-  const [addingWorking, setAddingWorking] = useState(false);
+  const [addingContainer, setAddingContainer] = useState(false);
   const [newPrimaryText, setNewPrimaryText] = useState('');
+  const [addingWorkingToContainer, setAddingWorkingToContainer] = useState<string | null>(null);
   const [newWorkingText, setNewWorkingText] = useState('');
+  const [canCreate, setCanCreate] = useState(true);
 
-  async function handleCreatePrimary() {
+  // Check if we can create a new container
+  useEffect(() => {
+    canCreateContainer(week.discipline).then(setCanCreate);
+  }, [week.discipline, week.containers.length]);
+
+  async function handleCreateContainer() {
     if (!newPrimaryText.trim()) {
-      setAddingPrimary(false);
+      setAddingContainer(false);
       setNewPrimaryText('');
       return;
     }
-    await onAddGoal('primary', week.weekStartDate, newPrimaryText);
-    setAddingPrimary(false);
+    await onCreateContainer(week.discipline, newPrimaryText, week.weekStartDate);
+    setAddingContainer(false);
     setNewPrimaryText('');
   }
 
-  async function handleCreateWorking() {
-    if (!newWorkingText.trim()) {
-      setAddingWorking(false);
-      setNewWorkingText('');
-      return;
-    }
-    await onAddGoal('working', week.weekStartDate, newWorkingText);
-    setAddingWorking(false);
-    setNewWorkingText('');
-  }
 
   return (
     <LiquidGlassCard>
@@ -429,115 +455,261 @@ function WeekCard({
         )}
       </div>
 
-      {/* Primary Goals Section - Always shown */}
-      <div className="mb-4">
-        <h4 className="font-medium text-white mb-2">Primary Goals</h4>
-        <ul className="space-y-2">
-          {week.primaryGoals.map(goal => (
-            <GoalItem
-              key={goal.id}
-              goal={goal}
+      {/* Goal Containers */}
+      <div className="space-y-4">
+        {week.containers.map(container => (
+          <GoalContainerCard
+            key={container.id}
+            container={container}
               editingGoal={editingGoal}
               editText={editText}
               setEditText={setEditText}
-              onEdit={() => onGoalEdit(goal)}
-              onDelete={() => onGoalDelete(goal.id)}
+            onGoalEdit={onGoalEdit}
+            onGoalDelete={onGoalDelete}
               onSave={onSave}
               onCancel={onCancel}
+            onAddWorkingGoal={onAddWorkingGoal}
+            addingWorkingToContainer={addingWorkingToContainer}
+            setAddingWorkingToContainer={setAddingWorkingToContainer}
+            newWorkingText={newWorkingText}
+            setNewWorkingText={setNewWorkingText}
             />
           ))}
-          {addingPrimary ? (
-            <li className="flex items-start gap-2 bg-white/10 p-2 rounded">
+
+        {/* Add Container Button */}
+        {addingContainer ? (
+          <div className="border border-white/20 rounded-lg p-3 bg-white/5">
+            <h5 className="text-sm font-semibold text-white/90 mb-2">Goal</h5>
               <input
                 type="text"
                 value={newPrimaryText}
                 onChange={(e) => setNewPrimaryText(e.target.value)}
-                className="flex-1 px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
+              className="w-full px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
                 autoFocus
-                placeholder="Enter primary goal"
+              placeholder="Enter goal"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    handleCreatePrimary();
+                  handleCreateContainer();
                   } else if (e.key === 'Escape') {
-                    setAddingPrimary(false);
+                  setAddingContainer(false);
                     setNewPrimaryText('');
                   }
                 }}
-                onBlur={handleCreatePrimary}
-              />
-            </li>
-          ) : (
-            <EmptyGoalItem
-              text="No goals set"
-              onClick={() => setAddingPrimary(true)}
+              onBlur={handleCreateContainer}
             />
-          )}
-        </ul>
-      </div>
-
-      {/* Working Goals Section - Always shown */}
-      <div>
-        <h4 className="font-medium text-white mb-2">Working Goals</h4>
-        <ul className="space-y-2">
-          {week.workingGoals.map(goal => (
-            <GoalItem
-              key={goal.id}
-              goal={goal}
-              editingGoal={editingGoal}
-              editText={editText}
-              setEditText={setEditText}
-              onEdit={() => onGoalEdit(goal)}
-              onDelete={() => onGoalDelete(goal.id)}
-              onSave={onSave}
-              onCancel={onCancel}
-              showDiscipline={true}
-            />
-          ))}
-          {addingWorking ? (
-            <li className="flex items-start gap-2 bg-white/10 p-2 rounded">
-              <input
-                type="text"
-                value={newWorkingText}
-                onChange={(e) => setNewWorkingText(e.target.value)}
-                className="flex-1 px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
-                autoFocus
-                placeholder="Enter working goal"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleCreateWorking();
-                  } else if (e.key === 'Escape') {
-                    setAddingWorking(false);
-                    setNewWorkingText('');
-                  }
-                }}
-                onBlur={handleCreateWorking}
-              />
-            </li>
-          ) : (
-            <EmptyGoalItem
-              text="No goals set"
-              onClick={() => setAddingWorking(true)}
-            />
-          )}
-        </ul>
+          </div>
+        ) : canCreate && week.containers.length < 3 ? (
+          <button
+            onClick={() => setAddingContainer(true)}
+            className="w-full py-2 px-4 border border-dashed border-white/30 rounded-lg text-white/70 hover:text-white hover:border-white/50 hover:bg-white/10 transition flex items-center justify-center gap-2"
+          >
+            <FaPlus size={14} />
+            <span>Add Goal Container</span>
+          </button>
+        ) : week.containers.length >= 3 ? (
+          <p className="text-sm text-white/50 text-center italic">Maximum 3 goal containers per discipline</p>
+        ) : null}
       </div>
     </LiquidGlassCard>
   );
 }
 
-interface EmptyGoalItemProps {
-  text: string;
-  onClick: () => void;
+interface GoalContainerCardProps {
+  container: GoalContainer;
+  editingGoal: Goal | null;
+  editText: string;
+  setEditText: (text: string) => void;
+  onGoalEdit: (goal: Goal) => void;
+  onGoalDelete: (goalId: string, isPrimary?: boolean) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onAddWorkingGoal: (containerId: string, content: string) => void;
+  addingWorkingToContainer: string | null;
+  setAddingWorkingToContainer: (id: string | null) => void;
+  newWorkingText: string;
+  setNewWorkingText: (text: string) => void;
 }
 
-function EmptyGoalItem({ text, onClick }: EmptyGoalItemProps) {
+function GoalContainerCard({
+  container,
+  editingGoal,
+  editText,
+  setEditText,
+  onGoalEdit,
+  onGoalDelete,
+  onSave,
+  onCancel,
+  onAddWorkingGoal,
+  addingWorkingToContainer,
+  setAddingWorkingToContainer,
+  newWorkingText,
+  setNewWorkingText,
+}: GoalContainerCardProps) {
+  const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);
+  const [workingGoals, setWorkingGoals] = useState<Goal[]>([]);
+  const [canAddWorking, setCanAddWorking] = useState(true);
+
+  useEffect(() => {
+    async function loadGoals() {
+      // Load primary goal
+      const primary = await progressTrackerDB.goals.get(container.primaryGoalId);
+      if (primary && !primary.archivedAt) {
+        setPrimaryGoal(primary);
+      }
+      // Load working goals - only get goals that are actually working goals (containerId !== id)
+      const allWorking = await Promise.all(
+        container.workingGoalIds.map(id => progressTrackerDB.goals.get(id).then(g => g!))
+      );
+      const validWorking = allWorking.filter(g =>
+        g &&
+        !g.archivedAt &&
+        g.containerId &&
+        g.containerId !== g.id && // Working goal: containerId !== id
+        g.type === 'working' // Double check it's a working goal
+      );
+      setWorkingGoals(validWorking);
+      // Check if we can add working goal
+      canAddWorkingGoal(container.id).then(setCanAddWorking);
+    }
+    loadGoals();
+  }, [container]);
+
+  async function handleAddWorkingGoal() {
+    if (!newWorkingText.trim()) {
+      setAddingWorkingToContainer(null);
+      setNewWorkingText('');
+      return;
+    }
+    await onAddWorkingGoal(container.id, newWorkingText);
+    setAddingWorkingToContainer(null);
+    setNewWorkingText('');
+  }
+
+  if (!primaryGoal) return null;
+
   return (
-    <li
-      onClick={onClick}
-      className="text-sm text-white/50 italic cursor-pointer hover:text-white/80 hover:bg-white/10 p-2 rounded transition group"
-    >
-      <span>{text}</span>
-    </li>
+    <div className="border-2 border-white/40 rounded-lg p-3 bg-white/5 group">
+      {/* Goal (as header) */}
+      <div className="mb-3">
+        {editingGoal?.id === primaryGoal.id && editingGoal?.type === 'primary' ? (
+          <>
+            <input
+              type="text"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              className="w-full px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white mb-2"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onSave();
+                } else if (e.key === 'Escape') {
+                  onCancel();
+                }
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={onSave}
+                className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Save
+              </button>
+              <button
+                onClick={onCancel}
+                className="px-2 py-1 text-sm bg-white/20 text-white rounded hover:bg-white/30"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-start justify-between gap-2">
+            <h5
+              className="text-base font-semibold text-white flex-1 cursor-pointer hover:text-white/80"
+              onClick={() => onGoalEdit(primaryGoal)}
+            >
+              {primaryGoal.content}
+            </h5>
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+              <button
+                onClick={() => onGoalEdit(primaryGoal)}
+                className="p-1 text-white/70 hover:text-white hover:bg-white/20 rounded"
+                aria-label="Edit goal"
+              >
+                <FaEdit size={14} />
+              </button>
+              <button
+                onClick={() => onGoalDelete(primaryGoal.id, true)}
+                className="p-1 text-white/70 hover:text-red-300 hover:bg-red-500/20 rounded"
+                aria-label="Delete goal"
+              >
+                <FaTrash size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Working Goals (bullet points, no label) - Reserve space for up to 2 working goals */}
+      <div className="min-h-[4rem]">
+        {workingGoals.length > 0 && (
+          <ul className="space-y-1">
+            {workingGoals.map(goal => (
+            <GoalItem
+              key={goal.id}
+              goal={goal}
+              editingGoal={editingGoal}
+              editText={editText}
+              setEditText={setEditText}
+              onEdit={() => onGoalEdit(goal)}
+                onDelete={() => {
+                  // Verify this is actually a working goal: working goals have containerId !== id
+                  // Primary goals have containerId === id (their own id)
+                  if (goal.containerId && goal.containerId !== goal.id) {
+                    onGoalDelete(goal.id, false);
+                  } else {
+                    logger.error('Attempted to delete primary goal as working goal', goal);
+                    alert('Error: Cannot delete primary goal from this action. Use the delete button on the goal header.');
+                  }
+                }}
+              onSave={onSave}
+              onCancel={onCancel}
+            />
+          ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Add working goal option */}
+      {addingWorkingToContainer === container.id ? (
+        <div className="mt-2">
+              <input
+                type="text"
+                value={newWorkingText}
+                onChange={(e) => setNewWorkingText(e.target.value)}
+            className="w-full px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
+                autoFocus
+                placeholder="Enter working goal"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                handleAddWorkingGoal();
+                  } else if (e.key === 'Escape') {
+                setAddingWorkingToContainer(null);
+                    setNewWorkingText('');
+                  }
+                }}
+            onBlur={handleAddWorkingGoal}
+          />
+      </div>
+      ) : canAddWorking && workingGoals.length < 2 ? (
+        <div
+          onClick={() => setAddingWorkingToContainer(container.id)}
+          className="text-sm text-white/50 italic cursor-pointer hover:text-white/80 hover:bg-white/10 p-2 rounded transition mt-2"
+        >
+          + Add working goal
+        </div>
+      ) : null}
+    </div>
   );
 }
 

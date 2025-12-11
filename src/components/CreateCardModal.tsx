@@ -51,6 +51,9 @@ export default function CreateCardModal({
 }: CreateCardModalProps) {
   const [cardTitle, setCardTitle] = useState('');
   const [cardText, setCardText] = useState('');
+  const [feeling, setFeeling] = useState('');
+  const [issue, setIssue] = useState('');
+  const [solution, setSolution] = useState('');
   const [selectedSequence, setSelectedSequence] = useState<string>('');
   const [selectedBodyTags, setSelectedBodyTags] = useState<string[]>([]);
   const [onIce, setOnIce] = useState<boolean | null>(null);
@@ -74,6 +77,9 @@ export default function CreateCardModal({
       // Reset form when modal closes
       setCardTitle('');
       setCardText('');
+      setFeeling('');
+      setIssue('');
+      setSolution('');
       setSelectedSequence('');
       setSelectedBodyTags([]);
       setOnIce(null);
@@ -173,17 +179,42 @@ export default function CreateCardModal({
   }
 
   async function handleSave() {
-    const allTags = [
-      ...(selectedSequence ? [selectedSequence] : []),
-      ...selectedBodyTags,
-    ];
-
     const selectedSection = sections?.find(s => s.id === selectedSectionId);
     const currentSectionTitle = selectedSection?.title || sectionTitle;
     const isExercises = currentSectionTitle === 'Exercises';
+    const isTroubleshooting = currentSectionTitle === 'Troubleshooting';
+    const isReminders = currentSectionTitle === 'Reminders';
 
-    // Validate body position tags: must have one from each group (unless it's exercises)
-    if (!isExercises) {
+    // For Reminders, don't include body position tags
+    const allTags = [
+      ...(selectedSequence ? [selectedSequence] : []),
+      ...(isReminders ? [] : selectedBodyTags),
+    ];
+
+    // Validate Troubleshooting fields
+    if (isTroubleshooting) {
+      if (!feeling.trim() || !issue.trim() || !solution.trim()) {
+        setTagError('Please fill in all Troubleshooting fields: Feeling, Issue, and Solution.');
+        return;
+      }
+    }
+
+    // Validate Reminders: check for duplicate Part of Element
+    if (isReminders && selectedSequence) {
+      const existingReminder = allCards.find(card =>
+        card.sectionTitle === 'Reminders' &&
+        card.sectionId === selectedSectionId &&
+        card.tags?.includes(selectedSequence)
+      );
+
+      if (existingReminder) {
+        setTagError(`A Reminder card already exists for "${sequenceTags.find(t => t.id === selectedSequence)?.label || selectedSequence}". Please edit the existing card instead.`);
+        return;
+      }
+    }
+
+    // Validate body position tags: must have one from each group (unless it's exercises or reminders)
+    if (!isExercises && !isReminders) {
       const hasFrontBack = selectedBodyTags.some(isFrontBackTag);
       const hasFreeGlide = selectedBodyTags.some(isFreeGlideTag);
       const hasUpperLower = selectedBodyTags.some(isUpperLowerTag);
@@ -194,10 +225,18 @@ export default function CreateCardModal({
       }
     }
 
-    // Validate sequence tag is required (unless it's exercises)
+    // Validate sequence tag is required for Reminders, Troubleshooting, and Theory (optional for Exercises)
     if (!isExercises && !selectedSequence) {
-      setTagError('Please select a sequence tag (Part of Element).');
+      setTagError('Please select a Part of Element option. This field is required for Reminders, Troubleshooting, and Theory sections.');
       return;
+    }
+
+    // Format content based on section type
+    let finalContent = '';
+    if (isTroubleshooting) {
+      finalContent = `Feeling: ${feeling.trim()}\n\nIssue: ${issue.trim()}\n\nSolution: ${solution.trim()}`;
+    } else {
+      finalContent = cardText.trim();
     }
 
     // Convert selected date to Unix timestamp (start of day in local timezone)
@@ -206,23 +245,46 @@ export default function CreateCardModal({
     const createdAt = dateObj.getTime();
 
     setTagError('');
-    await onSave(cardText.trim(), allTags, selectedSectionId, onIce, createdAt, cardTitle.trim() || undefined);
+    await onSave(finalContent, allTags, selectedSectionId, onIce, createdAt, cardTitle.trim() || undefined);
     onClose();
   }
 
   const selectedSection = sections?.find(s => s.id === selectedSectionId);
   const currentSectionTitle = selectedSection?.title || sectionTitle;
   const isExercises = currentSectionTitle === 'Exercises';
+  const isReminders = currentSectionTitle === 'Reminders';
+  const isTroubleshooting = currentSectionTitle === 'Troubleshooting';
 
   if (!isOpen) return null;
 
   const disciplineTags = deckDiscipline ? getDisciplineTags(deckDiscipline) : [];
-  // For exercises, use exercise sequence tags; otherwise use discipline tags
+  // For exercises, use all exercise sequence tags
+  // For other sections (Reminders, Troubleshooting, Theory), use discipline tags if available,
+  // otherwise fall back to all sequence tags to ensure the field appears (since it's required)
   const sequenceTags = isExercises
     ? getExerciseSequenceTags()
-    : disciplineTags.filter(t =>
-        TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
-      );
+    : (() => {
+        const filtered = disciplineTags.filter(t =>
+          TAG_GROUPS.sequence.includes(t.id as typeof TAG_GROUPS.sequence[number])
+        );
+        // If no discipline tags available, use all sequence tags (required field must be shown)
+        return filtered.length > 0 ? filtered : getExerciseSequenceTags();
+      })();
+
+  // For Reminders, check which Part of Element options are already used
+  const usedReminderSequences = useMemo(() => {
+    if (!isReminders) return new Set<string>();
+    return new Set(
+      allCards
+        .filter(card =>
+          card.sectionTitle === 'Reminders' &&
+          card.sectionId === selectedSectionId &&
+          card.tags?.some(tag => TAG_GROUPS.sequence.includes(tag as typeof TAG_GROUPS.sequence[number]))
+        )
+        .flatMap(card => card.tags || [])
+        .filter(tag => TAG_GROUPS.sequence.includes(tag as typeof TAG_GROUPS.sequence[number]))
+    );
+  }, [allCards, isReminders, selectedSectionId]);
 
   // Group similar cards by deck
   const cardsByDeck = new Map<string, SimilarCard[]>();
@@ -275,6 +337,39 @@ export default function CreateCardModal({
             </div>
           )}
 
+          {/* Sequence Selection (Set/Load/Jump/Snap/Exit) - First for Reminders, before Title */}
+          {sequenceTags.length > 0 && isReminders && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-white/90 mb-2">
+                Part of Element <span className="text-red-400">*</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {sequenceTags.map(tag => {
+                  const isUsed = usedReminderSequences.has(tag.id);
+                  const isDisabled = isUsed;
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => !isDisabled && toggleSequence(tag.id)}
+                      disabled={isDisabled}
+                      title={isDisabled ? 'Already created' : undefined}
+                      className={`px-3 py-1 rounded text-sm transition-colors ${
+                        isDisabled
+                          ? 'bg-gray-600/50 text-gray-400 cursor-not-allowed'
+                          : selectedSequence === tag.id
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white/20 text-white hover:bg-white/30'
+                      }`}
+                    >
+                      {tag.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Card Title */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-white/90 mb-2">
@@ -289,22 +384,8 @@ export default function CreateCardModal({
             />
           </div>
 
-          {/* Card Text */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-white/90 mb-2">
-              Card Text <span className="text-red-400">*</span>
-            </label>
-            <textarea
-              value={cardText}
-              onChange={(e) => setCardText(e.target.value)}
-              className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
-              rows={3}
-              placeholder="Enter your card content here..."
-            />
-          </div>
-
-          {/* Sequence Selection (Set/Load/Jump/Snap/Exit) */}
-          {sequenceTags.length > 0 && (
+          {/* Sequence Selection (Set/Load/Jump/Snap/Exit) - For non-Reminders sections */}
+          {sequenceTags.length > 0 && !isReminders && (
             <div className="mb-4">
               <label className="block text-sm font-medium text-white/90 mb-2">
                 Part of Element {!isExercises && <span className="text-red-400">*</span>}
@@ -328,12 +409,69 @@ export default function CreateCardModal({
             </div>
           )}
 
-          {/* Body Tags */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-white/90 mb-2">
-              Body Position {!isExercises && <span className="text-red-400">*</span>}
-              {!isExercises && <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>}
-            </label>
+          {/* Troubleshooting Fields */}
+          {isTroubleshooting ? (
+            <>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-white/90 mb-2">
+                  Feeling <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={feeling}
+                  onChange={(e) => setFeeling(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+                  rows={3}
+                  placeholder="What do you feel in the moment? Where do you feel it?"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-white/90 mb-2">
+                  Issue <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={issue}
+                  onChange={(e) => setIssue(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+                  rows={3}
+                  placeholder="A succinct sentence describing the root cause."
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-white/90 mb-2">
+                  Solution <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={solution}
+                  onChange={(e) => setSolution(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+                  rows={3}
+                  placeholder="How to fix the issue"
+                />
+              </div>
+            </>
+          ) : (
+            /* Card Text - For non-Troubleshooting sections */
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-white/90 mb-2">
+                Card Text <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                value={cardText}
+                onChange={(e) => setCardText(e.target.value)}
+                className="w-full px-3 py-2 bg-black/30 backdrop-blur-sm border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50"
+                rows={3}
+                placeholder="Enter your card content here..."
+              />
+            </div>
+          )}
+
+          {/* Body Tags - Not shown for Reminders or Exercises */}
+          {!isReminders && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-white/90 mb-2">
+                Body Position {!isExercises && <span className="text-red-400">*</span>}
+                {!isExercises && <span className="text-xs text-white/70 ml-2">(Select one from each group)</span>}
+              </label>
             <div className="space-y-3">
               {/* Anterior/Posterior Group */}
               <div>
@@ -406,6 +544,7 @@ export default function CreateCardModal({
               </div>
             </div>
           </div>
+          )}
 
           {/* Date Selection */}
           <div className="mb-4">
@@ -526,7 +665,10 @@ export default function CreateCardModal({
             <button
               type="button"
               onClick={handleSave}
-              disabled={!cardText.trim() || !cardTitle.trim()}
+              disabled={
+                !cardTitle.trim() ||
+                (isTroubleshooting ? (!feeling.trim() || !issue.trim() || !solution.trim()) : !cardText.trim())
+              }
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-gray-500/50 disabled:cursor-not-allowed"
             >
               Save Card

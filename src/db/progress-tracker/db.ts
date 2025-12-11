@@ -13,6 +13,12 @@ export class ProgressTrackerDB extends Dexie {
       appData: "id, startDate",
       goalRatings: "goalId, archivedAt"
     });
+    // Version 3: Add containerId to goals
+    this.version(3).stores({
+      goals: "id, discipline, type, createdAt, archivedAt, weekStartDate, containerId",
+      appData: "id, startDate",
+      goalRatings: "goalId, archivedAt"
+    });
   }
 }
 

@@ -4,6 +4,7 @@ import { getAllDecksFromNeon } from '../training-coach/neon-operations';
 import { trainingCoachDB } from '../training-coach/db';
 import { Deck } from '../training-coach/types';
 import { getAllDecks } from '../training-coach/operations';
+import { logger } from '../../utils/logger';
 
 export interface SyncResult {
   success: boolean;
@@ -70,7 +71,7 @@ export async function checkSyncStatus(): Promise<SyncStatus> {
       remoteLastUpdated,
     };
   } catch (error: any) {
-    console.error('[Sync] Error checking sync status:', error);
+    logger.error('[Sync] Error checking sync status:', error);
     // If we can't check, assume we need to sync (safer)
     return {
       needsSync: true,
@@ -85,14 +86,14 @@ export async function checkSyncStatus(): Promise<SyncStatus> {
 
 export async function syncAllDecksFromNeon(): Promise<SyncResult> {
   try {
-    console.log('[Sync] Checking if sync is needed...');
+    logger.verbose('[Sync] Checking if sync is needed...');
 
     // Check sync status first
     const syncStatus = await checkSyncStatus();
-    console.log('[Sync] Sync status:', syncStatus);
+    logger.verbose('[Sync] Sync status:', syncStatus);
 
     if (!syncStatus.needsSync) {
-      console.log(`[Sync] No sync needed: ${syncStatus.reason}`);
+      logger.verbose(`[Sync] No sync needed: ${syncStatus.reason}`);
       return {
         success: true,
         decksSynced: 0,
@@ -100,31 +101,31 @@ export async function syncAllDecksFromNeon(): Promise<SyncResult> {
       };
     }
 
-    console.log(`[Sync] Sync needed: ${syncStatus.reason}`);
-    console.log('[Sync] Starting sync from Neon to IndexedDB...');
+    logger.info(`[Sync] Sync needed: ${syncStatus.reason}`);
+    logger.info('[Sync] Starting sync from Neon to IndexedDB...');
 
     // Fetch all decks from Neon
     const neonDecks = await getAllDecksFromNeon();
-    console.log(`[Sync] Fetched ${neonDecks.length} decks from Neon`);
+    logger.info(`[Sync] Fetched ${neonDecks.length} decks from Neon`);
 
     // Clear existing decks in IndexedDB
     await trainingCoachDB.decks.clear();
-    console.log('[Sync] Cleared IndexedDB decks');
+    logger.verbose('[Sync] Cleared IndexedDB decks');
 
     // Add all decks to IndexedDB
     if (neonDecks.length > 0) {
       await trainingCoachDB.decks.bulkAdd(neonDecks);
-      console.log(`[Sync] Added ${neonDecks.length} decks to IndexedDB`);
+      logger.info(`[Sync] Added ${neonDecks.length} decks to IndexedDB`);
     }
 
-    console.log('[Sync] Sync complete!');
+    logger.info('[Sync] Sync complete!');
     return {
       success: true,
       decksSynced: neonDecks.length,
       wasOutOfSync: true,
     };
   } catch (error: any) {
-    console.error('[Sync] Sync failed:', error);
+    logger.error('[Sync] Sync failed:', error);
     return {
       success: false,
       decksSynced: 0,
@@ -142,12 +143,12 @@ export async function syncDeckFromNeon(deckId: string): Promise<Deck | null> {
     if (deck) {
       // Upsert the deck in IndexedDB
       await trainingCoachDB.decks.put(deck);
-      console.log(`[Sync] Synced deck ${deckId} to IndexedDB`);
+      logger.verbose(`[Sync] Synced deck ${deckId} to IndexedDB`);
     }
 
     return deck;
   } catch (error: any) {
-    console.error(`[Sync] Failed to sync deck ${deckId}:`, error);
+    logger.error(`[Sync] Failed to sync deck ${deckId}:`, error);
     throw error;
   }
 }
