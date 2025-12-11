@@ -7,7 +7,7 @@ import { getAllDecks } from '../training-coach/operations';
 import { getAllGoalsFromNeon, getAppDataFromNeon } from '../progress-tracker/neon-operations';
 import { progressTrackerDB } from '../progress-tracker/db';
 import { Goal, AppData } from '../progress-tracker/types';
-import { getAllGoals, getAppData } from '../progress-tracker/operations';
+import { getAllGoals } from '../progress-tracker/operations';
 import { logger } from '../../utils/logger';
 
 export interface SyncResult {
