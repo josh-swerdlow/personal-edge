@@ -15,7 +15,8 @@
     "clean": "rm -rf dist dist-ssr .vite node_modules/.vite",
     "prebuild": "pnpm run clean",
     "generate-icons": "node scripts/generate-icons.js",
-    "import:neon": "tsx scripts/importToNeon.ts"
+    "import:neon": "tsx scripts/importToNeon.ts",
+    "db": "tsx scripts/pushToNeon.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.0",

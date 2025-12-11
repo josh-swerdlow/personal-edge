@@ -22,6 +22,17 @@ import('./utils/importUpdate').then(({ importUpdate }) => {
   logger.error('Failed to load import update:', err);
 });
 
+// Expose pushToProduction function for pushing localhost data to production (dev only)
+if (import.meta.env.DEV) {
+  import('./utils/pushToProduction').then(({ pushToProduction }) => {
+    // Expose to window for console access
+    (window as Window & { pushToProduction?: typeof pushToProduction }).pushToProduction = pushToProduction;
+    console.log('💡 Tip: Use window.pushToProduction() in the console to push localhost data to production');
+  }).catch(err => {
+    logger.error('Failed to load pushToProduction:', err);
+  });
+}
+
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
