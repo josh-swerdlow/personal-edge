@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS goals (
     container_id TEXT,            -- For primary goals: container_id === id. For working goals: references primary goal id
     created_at BIGINT NOT NULL,  -- Unix timestamp
     archived_at BIGINT,          -- Unix timestamp (nullable)
+    week_start_date DATE,        -- ISO date string for the week this goal belongs to (nullable)
     created_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

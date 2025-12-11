@@ -1,7 +1,7 @@
 // Sync Provider: Handles initial sync from Neon and error handling
 
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import { syncAllDecksFromNeon, SyncResult } from '../db/sync/syncFromNeon';
+import { syncAllDecksFromNeon, syncAllGoalsFromNeon, SyncResult } from '../db/sync/syncFromNeon';
 import { getErrorMessage, isNetworkError } from '../utils/errorHandler';
 import SyncErrorModal from './SyncErrorModal';
 import { logger } from '../utils/logger';
@@ -35,16 +35,23 @@ export default function SyncProvider({ children }: SyncProviderProps) {
     setSyncError(null);
 
     try {
-      const result = await syncAllDecksFromNeon();
+      // Sync both decks and goals
+      const decksResult = await syncAllDecksFromNeon();
+      const goalsResult = await syncAllGoalsFromNeon();
 
-      if (!result.success) {
-        throw new Error(result.error || 'Sync failed');
+      if (!decksResult.success) {
+        throw new Error(decksResult.error || 'Decks sync failed');
       }
 
-      logger.info(`[SyncProvider] Sync result: ${result.decksSynced} decks synced, wasOutOfSync: ${result.wasOutOfSync}`);
+      if (!goalsResult.success) {
+        throw new Error(goalsResult.error || 'Goals sync failed');
+      }
 
-      // Only reload if we actually synced data (wasOutOfSync = true) and got decks
-      if (result.wasOutOfSync && result.decksSynced > 0) {
+      const wasOutOfSync = decksResult.wasOutOfSync || goalsResult.wasOutOfSync;
+      logger.info(`[SyncProvider] Sync result: ${decksResult.decksSynced} decks, ${goalsResult.goalsSynced} goals synced, wasOutOfSync: ${wasOutOfSync}`);
+
+      // Only reload if we actually synced data (wasOutOfSync = true) and got data
+      if (wasOutOfSync && (decksResult.decksSynced > 0 || goalsResult.goalsSynced > 0)) {
         logger.info('[SyncProvider] Data was out of sync and has been updated, reloading page to refresh all components...');
         // Small delay to ensure state is saved before reload
         setTimeout(() => {
@@ -52,7 +59,7 @@ export default function SyncProvider({ children }: SyncProviderProps) {
         }, 100);
       }
 
-      return result;
+      return decksResult;
       } catch (error: any) {
         const errorMessage = getErrorMessage(error);
         logger.error('[SyncProvider] Sync error:', errorMessage);
@@ -89,17 +96,19 @@ export default function SyncProvider({ children }: SyncProviderProps) {
 
         // Check sync status first - only sync if IndexedDB is out of sync
         logger.verbose('[SyncProvider] Checking if sync is needed...');
-        const { checkSyncStatus } = await import('../db/sync/syncFromNeon');
+        const { checkSyncStatus, checkGoalsSyncStatus } = await import('../db/sync/syncFromNeon');
         const syncStatus = await checkSyncStatus();
+        const goalsSyncStatus = await checkGoalsSyncStatus();
 
-        if (!syncStatus.needsSync) {
-          logger.verbose(`[SyncProvider] No sync needed: ${syncStatus.reason}`);
+        const needsSync = syncStatus.needsSync || goalsSyncStatus.needsSync;
+        if (!needsSync) {
+          logger.verbose(`[SyncProvider] No sync needed: ${syncStatus.reason}, ${goalsSyncStatus.reason}`);
           setHasInitialized(true);
           return;
         }
 
         // Sync is needed - perform the sync
-        logger.info(`[SyncProvider] Sync needed: ${syncStatus.reason}`);
+        logger.info(`[SyncProvider] Sync needed: ${syncStatus.reason || goalsSyncStatus.reason}`);
         logger.info('[SyncProvider] Starting sync from Neon...');
         await performSync();
 

@@ -1,6 +1,14 @@
 import { progressTrackerDB } from './db';
 import { AppData, Goal, GoalContainer } from './types';
 import { DISCIPLINES } from '../../utils/disciplines';
+import {
+  createGoalInNeon,
+  updateGoalInNeon,
+  deleteGoalInNeon,
+  updateAppDataInNeon,
+} from './neon-operations';
+import { syncGoalFromNeon, syncAppDataFromNeon } from '../sync/syncFromNeon';
+import { NetworkError, withRetry } from '../../utils/errorHandler';
 
 // Simple UUID v4 generator for browser
 function generateUUID(): string {
@@ -52,6 +60,84 @@ export function getWeekStartDate(startDate: string): string {
   return currentWeekStart.toISOString().split('T')[0];
 }
 
+// Helper functions for Neon sync
+function isNeonAvailable(): boolean {
+  return import.meta.env.PROD || !!import.meta.env.VITE_API_URL;
+}
+
+function isNetworkError(error: any): boolean {
+  return error?.code === 'ECONNREFUSED' ||
+         error?.code === 'ETIMEDOUT' ||
+         error?.message?.includes('network') ||
+         error?.message?.includes('fetch') ||
+         error?.message?.includes('connection');
+}
+
+// Helper to write goal to Neon and sync back to IndexedDB
+async function writeGoalToNeonAndSync(
+  writeFn: () => Promise<Goal>,
+  goalId: string
+): Promise<Goal> {
+  if (!isNeonAvailable()) {
+    // If Neon is not configured, just use IndexedDB (for local dev)
+    return await writeFn();
+  }
+
+  try {
+    // Write to Neon first (source of truth)
+    const goal = await withRetry(writeFn, {
+      maxRetries: 3,
+      retryDelay: 1000,
+    });
+
+    // Sync the goal back from Neon to IndexedDB
+    await syncGoalFromNeon(goalId);
+
+    return goal;
+  } catch (error: any) {
+    // If Neon write fails, throw a NetworkError for user-friendly handling
+    if (isNetworkError(error)) {
+      throw new NetworkError(
+        'Failed to save changes. Please check your internet connection and try again.',
+        error
+      );
+    }
+    throw error;
+  }
+}
+
+// Helper to write app data to Neon and sync back to IndexedDB
+async function writeAppDataToNeonAndSync(
+  writeFn: () => Promise<AppData>
+): Promise<AppData> {
+  if (!isNeonAvailable()) {
+    // If Neon is not configured, just use IndexedDB (for local dev)
+    return await writeFn();
+  }
+
+  try {
+    // Write to Neon first (source of truth)
+    const appData = await withRetry(writeFn, {
+      maxRetries: 3,
+      retryDelay: 1000,
+    });
+
+    // Sync the app data back from Neon to IndexedDB
+    await syncAppDataFromNeon();
+
+    return appData;
+  } catch (error: any) {
+    // If Neon write fails, throw a NetworkError for user-friendly handling
+    if (isNetworkError(error)) {
+      throw new NetworkError(
+        'Failed to save changes. Please check your internet connection and try again.',
+        error
+      );
+    }
+    throw error;
+  }
+}
+
 // AppData Operations
 export async function getAppData(): Promise<AppData> {
   const appData = await progressTrackerDB.appData.get('app-data-1');
@@ -74,8 +160,16 @@ export async function updateAppData(updates: Partial<Omit<AppData, 'id'>>): Prom
     ...updates,
   };
 
-  await progressTrackerDB.appData.update('app-data-1', updated);
-  return updated;
+  return await writeAppDataToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await updateAppDataInNeon(updates);
+      } else {
+        await progressTrackerDB.appData.update('app-data-1', updated);
+        return updated;
+      }
+    }
+  );
 }
 
 export async function initializeAppData(startDate: string, cycleLength: number = 3): Promise<AppData> {
@@ -97,8 +191,17 @@ export async function createGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<
     createdAt: Date.now(),
   };
 
-  await progressTrackerDB.goals.add(newGoal);
-  return newGoal;
+  return await writeGoalToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await createGoalInNeon(newGoal);
+      } else {
+        await progressTrackerDB.goals.add(newGoal);
+        return newGoal;
+      }
+    },
+    newGoal.id
+  );
 }
 
 export async function updateGoal(id: string, updates: Partial<Omit<Goal, 'id' | 'createdAt'>>): Promise<Goal> {
@@ -112,16 +215,46 @@ export async function updateGoal(id: string, updates: Partial<Omit<Goal, 'id' | 
     ...updates,
   };
 
-  await progressTrackerDB.goals.update(id, updated);
-  return updated;
+  return await writeGoalToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await updateGoalInNeon(id, updates);
+      } else {
+        await progressTrackerDB.goals.update(id, updated);
+        return updated;
+      }
+    },
+    id
+  );
 }
 
 export async function archiveGoal(id: string): Promise<void> {
-  await progressTrackerDB.goals.update(id, { archivedAt: Date.now() });
+  await updateGoal(id, { archivedAt: Date.now() });
 }
 
 export async function deleteGoal(id: string): Promise<void> {
-  await progressTrackerDB.goals.delete(id);
+  if (isNeonAvailable()) {
+    try {
+      await withRetry(
+        async () => {
+          await deleteGoalInNeon(id);
+        },
+        { maxRetries: 3, retryDelay: 1000 }
+      );
+      // Sync: remove from IndexedDB after successful Neon delete
+      await progressTrackerDB.goals.delete(id);
+    } catch (error: any) {
+      if (isNetworkError(error)) {
+        throw new NetworkError(
+          'Failed to delete goal. Please check your internet connection and try again.',
+          error
+        );
+      }
+      throw error;
+    }
+  } else {
+    await progressTrackerDB.goals.delete(id);
+  }
 }
 
 export async function getActiveGoals(
