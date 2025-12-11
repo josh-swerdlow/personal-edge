@@ -127,7 +127,6 @@ export default function ProgressTracker() {
           <ProgressTrackerSettings
             appData={appData}
             onClose={() => setShowSettings(false)}
-            onSuccess={handleArchiveWeek}
           />
         )}
     </PageLayout>

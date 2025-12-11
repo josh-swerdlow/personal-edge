@@ -53,10 +53,9 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
       setAppData(data);
 
       const currentWeekStart = getWeekStartDate(data.startDate);
-      const currentWeekStartDate = new Date(currentWeekStart);
-
-      // Calculate which discipline this week is
-      const daysFromStart = Math.floor((currentWeekStartDate.getTime() - new Date(data.startDate).getTime()) / (1000 * 60 * 60 * 24));
+      // Calculate which discipline this week is using current date (not week start date)
+      const now = new Date();
+      const daysFromStart = Math.floor((now.getTime() - new Date(data.startDate).getTime()) / (1000 * 60 * 60 * 24));
       const weekNumber = Math.floor(daysFromStart / 7);
       const cyclePosition = weekNumber % data.cycleLength;
       const discipline = disciplines[cyclePosition];
@@ -85,18 +84,23 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
 
     setLoading(true);
     try {
-      const currentWeekStart = getWeekStartDate(appData.startDate);
-      const currentWeekStartDate = new Date(currentWeekStart);
+      // Calculate current week number first
+      const now = new Date();
+      const daysFromStart = Math.floor((now.getTime() - new Date(appData.startDate).getTime()) / (1000 * 60 * 60 * 24));
+      const currentWeekNumber = Math.floor(daysFromStart / 7);
 
       const future: WeekData[] = [];
       for (let i = 1; i <= 3; i++) {
-        const weekStart = new Date(currentWeekStartDate);
-        weekStart.setDate(weekStart.getDate() + (i * 7));
+        // Calculate the week number for this future week
+        const futureWeekNumber = currentWeekNumber + i;
+
+        // Calculate the week start date directly from start date and week number
+        const weekStart = new Date(appData.startDate);
+        weekStart.setDate(weekStart.getDate() + (futureWeekNumber * 7));
         const weekStartStr = weekStart.toISOString().split('T')[0];
 
-        const daysFromStart = Math.floor((weekStart.getTime() - new Date(appData.startDate).getTime()) / (1000 * 60 * 60 * 24));
-        const weekNumber = Math.floor(daysFromStart / 7);
-        const cyclePosition = weekNumber % appData.cycleLength;
+        // Calculate discipline using the week number
+        const cyclePosition = futureWeekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
         // Load goal containers for this week
@@ -122,18 +126,23 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
 
     setLoading(true);
     try {
-      const currentWeekStart = getWeekStartDate(appData.startDate);
-      const currentWeekStartDate = new Date(currentWeekStart);
+      // Calculate current week number first
+      const now = new Date();
+      const daysFromStart = Math.floor((now.getTime() - new Date(appData.startDate).getTime()) / (1000 * 60 * 60 * 24));
+      const currentWeekNumber = Math.floor(daysFromStart / 7);
 
       const past: WeekData[] = [];
       for (let i = 1; i <= 6; i++) {
-        const weekStart = new Date(currentWeekStartDate);
-        weekStart.setDate(weekStart.getDate() - (i * 7));
+        // Calculate the week number for this past week
+        const pastWeekNumber = currentWeekNumber - i;
+
+        // Calculate the week start date directly from start date and week number
+        const weekStart = new Date(appData.startDate);
+        weekStart.setDate(weekStart.getDate() + (pastWeekNumber * 7));
         const weekStartStr = weekStart.toISOString().split('T')[0];
 
-        const daysFromStart = Math.floor((weekStart.getTime() - new Date(appData.startDate).getTime()) / (1000 * 60 * 60 * 24));
-        const weekNumber = Math.floor(daysFromStart / 7);
-        const cyclePosition = weekNumber % appData.cycleLength;
+        // Calculate discipline using the week number
+        const cyclePosition = pastWeekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
         // Load goal containers for this week

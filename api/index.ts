@@ -10,6 +10,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Log all incoming requests for debugging
+app.use((req: Request, res: Response, next) => {
+  console.log(`[API] ${req.method} ${req.path}`);
+  next();
+});
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.error('ERROR: DATABASE_URL environment variable is not set');
@@ -422,6 +428,12 @@ app.put('/api/app-data', async (req: Request, res: Response) => {
     console.error('Error updating app data:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Catch-all handler for unmatched routes
+app.use((req: Request, res: Response) => {
+  console.error(`[API] Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({ error: 'Not Found', path: req.path });
 });
 
 export default app;

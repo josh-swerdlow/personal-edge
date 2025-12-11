@@ -61,6 +61,27 @@ export function getWeekStartDate(startDate: string): string {
 }
 
 // Helper functions for Neon sync
+function normalizeWeekStartDate(value?: string | Date): string | undefined {
+  if (!value) return undefined;
+
+  // Handle Date objects (in case value is passed as Date from database)
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+
+  // Handle string values
+  const trimmed = String(value).trim();
+  if (!trimmed) return undefined;
+
+  // Extract date part from ISO string (handles "2025-12-08" and "2025-12-08T00:00:00.000Z")
+  const dateMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    return dateMatch[1];
+  }
+
+  return undefined;
+}
+
 function isNeonAvailable(): boolean {
   return import.meta.env.PROD || !!import.meta.env.VITE_API_URL;
 }
@@ -362,8 +383,13 @@ export async function getGoalContainersByDiscipline(
     .toArray();
 
   // Filter by weekStartDate if provided
-  if (weekStartDate) {
-    primaryGoals = primaryGoals.filter(g => g.weekStartDate === weekStartDate || !g.weekStartDate);
+  const normalizedTarget = normalizeWeekStartDate(weekStartDate);
+  if (normalizedTarget) {
+    primaryGoals = primaryGoals.filter(g => {
+      const normalizedGoalWeek = normalizeWeekStartDate(g.weekStartDate);
+      // Include goals that match the target week OR goals without a weekStartDate (legacy goals)
+      return normalizedGoalWeek === normalizedTarget || !normalizedGoalWeek;
+    });
   }
   // If no weekStartDate provided, return ALL active containers (current + future weeks)
 
@@ -644,4 +670,3 @@ export async function cleanupMooGoals(): Promise<void> {
     await deleteGoalsByContentPattern(pattern, 'Spins');
   }
 }
-
