@@ -4,7 +4,7 @@ import cors from 'cors';
 import { neon } from '@neondatabase/serverless';
 // Import Deck type - using relative path that Vercel can resolve
 import type { Deck } from '../src/db/training-coach/types';
-import type { Goal, AppData } from '../src/db/progress-tracker/types';
+import type { Goal, AppData, GoalFeedback } from '../src/db/progress-tracker/types';
 
 const app = express();
 app.use(cors());
@@ -23,6 +23,66 @@ if (!databaseUrl) {
 }
 
 const sql = databaseUrl ? neon(databaseUrl) : null;
+
+const toMillis = (value: any): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  if (value instanceof Date) return value.getTime();
+  return undefined;
+};
+
+const toMillisOrNow = (value: any): number => toMillis(value) ?? Date.now();
+
+const feedbackRowToGoalFeedback = (row: any): GoalFeedback => ({
+  id: row.id,
+  goalId: row.goal_id,
+  containerId: row.container_id,
+  discipline: row.discipline,
+  weekStartDate: row.week_start_date || undefined,
+  rating: row.rating === null || row.rating === undefined ? undefined : Number(row.rating),
+  feedback: row.feedback || undefined,
+  completed: row.completed ?? false,
+  createdAt: toMillisOrNow(row.created_at),
+  updatedAt: toMillisOrNow(row.updated_at),
+});
+
+function validateRating(rating: any): number | undefined {
+  if (rating === null || rating === undefined || rating === '') {
+    return undefined;
+  }
+
+  const parsed = Number(rating);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    throw new Error('Rating must be an integer between 1 and 5.');
+  }
+  if (parsed < 1 || parsed > 5) {
+    throw new Error('Rating must be between 1 and 5.');
+  }
+  return parsed;
+}
+
+function normalizeWeekString(value: any): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+  const str = String(value);
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : undefined;
+}
+
+function ensureWeekNotFuture(weekStartDate?: string) {
+  if (!weekStartDate) return;
+  const weekDate = new Date(`${weekStartDate}T00:00:00Z`);
+  if (weekDate.getTime() > Date.now()) {
+    throw new Error('Cannot submit feedback for a future week.');
+  }
+}
 
 // Get all decks
 app.get('/api/decks', async (_req: Request, res: Response) => {
@@ -342,6 +402,179 @@ app.delete('/api/goals/:id', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting goal:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Goal feedback routes
+app.get('/api/goal-feedback', async (req: Request, res: Response) => {
+  if (!sql) {
+    return res.status(500).json({ error: 'Database not configured' });
+  }
+  try {
+    const { containerId, goalId, weekStartDate, discipline, completed } = req.query as Record<string, string | undefined>;
+    const result = await sql`
+      SELECT * FROM goal_feedback
+      ORDER BY created_at DESC
+    `;
+
+    const completedFilter = typeof completed === 'string'
+      ? completed.toLowerCase() === 'true'
+      : undefined;
+
+    const filtered = result
+      .map(feedbackRowToGoalFeedback)
+      .filter(entry => {
+        if (containerId && entry.containerId !== containerId) return false;
+        if (goalId && entry.goalId !== goalId) return false;
+        if (weekStartDate && entry.weekStartDate !== weekStartDate) return false;
+        if (discipline && entry.discipline !== discipline) return false;
+        if (completedFilter !== undefined && entry.completed !== completedFilter) return false;
+        return true;
+      });
+
+    res.json(filtered);
+  } catch (error: any) {
+    console.error('Error fetching goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/goal-feedback/:id', async (req: Request, res: Response) => {
+  if (!sql) {
+    return res.status(500).json({ error: 'Database not configured' });
+  }
+  try {
+    const result = await sql`
+      SELECT * FROM goal_feedback WHERE id = ${req.params.id}
+    `;
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Goal feedback not found' });
+    }
+
+    res.json(feedbackRowToGoalFeedback(result[0]));
+  } catch (error: any) {
+    console.error('Error fetching goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/goal-feedback', async (req: Request, res: Response) => {
+  if (!sql) {
+    return res.status(500).json({ error: 'Database not configured' });
+  }
+  try {
+    const payload: GoalFeedback = req.body;
+    if (!payload.goalId || !payload.containerId || !payload.discipline) {
+      return res.status(400).json({ error: 'goalId, containerId, and discipline are required' });
+    }
+
+    const rating = validateRating(payload.rating);
+    const normalizedWeek = normalizeWeekString(payload.weekStartDate);
+    try {
+      ensureWeekNotFuture(normalizedWeek);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+    const now = Date.now();
+    const feedback: GoalFeedback = {
+      ...payload,
+      rating,
+      feedback: payload.feedback ?? undefined,
+      completed: payload.completed ?? false,
+      createdAt: payload.createdAt ?? now,
+      updatedAt: payload.updatedAt ?? now,
+      weekStartDate: normalizedWeek,
+    };
+
+    await sql`
+      INSERT INTO goal_feedback (
+        id,
+        goal_id,
+        container_id,
+        discipline,
+        week_start_date,
+        rating,
+        feedback,
+        completed,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${feedback.id},
+        ${feedback.goalId},
+        ${feedback.containerId},
+        ${feedback.discipline},
+        ${feedback.weekStartDate || null},
+        ${feedback.rating ?? null},
+        ${feedback.feedback || null},
+        ${feedback.completed},
+        ${feedback.createdAt},
+        ${feedback.updatedAt}
+      )
+    `;
+
+    res.json(feedback);
+  } catch (error: any) {
+    console.error('Error creating goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/goal-feedback/:id', async (req: Request, res: Response) => {
+  if (!sql) {
+    return res.status(500).json({ error: 'Database not configured' });
+  }
+  try {
+    const updates = req.body;
+    const current = await sql`
+      SELECT * FROM goal_feedback WHERE id = ${req.params.id}
+    `;
+
+    if (current.length === 0) {
+      return res.status(404).json({ error: 'Goal feedback not found' });
+    }
+
+    const row = current[0];
+    const rating = validateRating(updates.rating ?? row.rating);
+    const normalizedWeek = normalizeWeekString(updates.weekStartDate ?? row.week_start_date);
+    try {
+      ensureWeekNotFuture(normalizedWeek);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const updated: GoalFeedback = {
+      id: row.id,
+      goalId: updates.goalId ?? row.goal_id,
+      containerId: updates.containerId ?? row.container_id,
+      discipline: updates.discipline ?? row.discipline,
+      weekStartDate: normalizedWeek,
+      rating,
+      feedback: updates.feedback ?? row.feedback ?? undefined,
+      completed: updates.completed ?? (row.completed ?? false),
+      createdAt: toMillisOrNow(row.created_at),
+      updatedAt: Date.now(),
+    };
+
+    await sql`
+      UPDATE goal_feedback
+      SET
+        goal_id = ${updated.goalId},
+        container_id = ${updated.containerId},
+        discipline = ${updated.discipline},
+        week_start_date = ${updated.weekStartDate || null},
+        rating = ${updated.rating ?? null},
+        feedback = ${updated.feedback || null},
+        completed = ${updated.completed},
+        updated_at = ${updated.updatedAt}
+      WHERE id = ${req.params.id}
+    `;
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Error updating goal feedback:', error);
     res.status(500).json({ error: error.message });
   }
 });
