@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { FaCog, FaArchive } from 'react-icons/fa';
+import { FaCog } from 'react-icons/fa';
 import { useProgressTracker } from '../hooks/useProgressTracker';
 import { createGoal, updateGoal } from '../db/progress-tracker/operations';
 import { Goal } from '../db/progress-tracker/types';
 import GoalForm from '../components/GoalForm';
-import ArchiveWeekModal from '../components/ArchiveWeekModal';
 import ProgressTrackerSettings from '../components/ProgressTrackerSettings';
 import UnifiedWeekView from '../components/UnifiedWeekView';
 import PageLayout from '../components/PageLayout';
@@ -16,7 +15,6 @@ export default function ProgressTracker() {
     loading,
     currentFocus,
     refreshGoals,
-    refreshAppData,
   } = useProgressTracker();
 
   const [showGoalForm, setShowGoalForm] = useState(false);
@@ -25,7 +23,6 @@ export default function ProgressTracker() {
     discipline?: "Spins" | "Jumps" | "Edges";
     type?: "primary" | "working";
   }>({});
-  const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   async function handleCreateGoal(goal: Omit<Goal, 'id' | 'createdAt'>) {
@@ -42,12 +39,6 @@ export default function ProgressTracker() {
     setEditingGoal(null);
     setShowGoalForm(false);
   }
-
-  async function handleArchiveWeek() {
-    await refreshGoals();
-    await refreshAppData();
-  }
-
 
   if (loading) {
     return (
@@ -79,13 +70,6 @@ export default function ProgressTracker() {
             >
               <FaCog size={20} />
             </button>
-            <button
-              onClick={() => setShowArchiveModal(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lgtransition flex items-center gap-2"
-            >
-              <FaArchive size={16} />
-              Complete Week
-            </button>
           </div>
         </div>
       </LiquidGlassCard>
@@ -113,14 +97,6 @@ export default function ProgressTracker() {
               />
             </div>
           </div>
-        )}
-
-        {showArchiveModal && currentFocus && (
-          <ArchiveWeekModal
-            focusDiscipline={currentFocus}
-            onClose={() => setShowArchiveModal(false)}
-            onSuccess={handleArchiveWeek}
-          />
         )}
 
         {showSettings && appData && (

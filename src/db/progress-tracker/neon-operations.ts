@@ -1,7 +1,7 @@
 // Neon PostgreSQL operations for Progress Tracker
 // Uses backend API to keep credentials secure
 
-import { Goal, AppData } from './types';
+import { Goal, AppData, GoalSubmission, GoalFeedback } from './types';
 
 // Get API URL - always use relative URLs in production/preview (same domain), absolute for local dev
 const getApiUrl = () => {
@@ -56,7 +56,7 @@ export async function getGoalFromNeon(id: string): Promise<Goal | null> {
   }
 }
 
-export async function createGoalInNeon(goal: Omit<Goal, 'createdAt'>): Promise<Goal> {
+export async function createGoalInNeon(goal: Omit<Goal, 'createdAt' | 'updatedAt'>): Promise<Goal> {
   return await apiRequest<Goal>('/api/goals', {
     method: 'POST',
     body: JSON.stringify(goal),
@@ -76,6 +76,106 @@ export async function updateGoalInNeon(
 export async function deleteGoalInNeon(id: string): Promise<void> {
   await apiRequest(`/api/goals/${id}`, {
     method: 'DELETE',
+  });
+}
+
+// Goal Submission Operations
+export async function getGoalSubmissionFromNeon(id: string): Promise<GoalSubmission | null> {
+  try {
+    return await apiRequest<GoalSubmission>(`/api/goal-submissions/${id}`);
+  } catch (error: any) {
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getGoalSubmissionByContainerFromNeon(
+  containerId: string,
+  weekStartDate?: string
+): Promise<GoalSubmission | null> {
+  const params = new URLSearchParams({ containerId });
+  if (weekStartDate) {
+    params.set('weekStartDate', weekStartDate);
+  }
+
+  try {
+    return await apiRequest<GoalSubmission>(`/api/goal-submissions?${params.toString()}`);
+  } catch (error: any) {
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function createGoalSubmissionInNeon(
+  submission: GoalSubmission
+): Promise<GoalSubmission> {
+  return await apiRequest<GoalSubmission>('/api/goal-submissions', {
+    method: 'POST',
+    body: JSON.stringify(submission),
+  });
+}
+
+export async function updateGoalSubmissionInNeon(
+  id: string,
+  updates: Partial<Omit<GoalSubmission, 'id'>>
+): Promise<GoalSubmission> {
+  return await apiRequest<GoalSubmission>(`/api/goal-submissions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+// Goal Feedback Operations
+export interface GoalFeedbackQueryParams {
+  containerId?: string;
+  goalId?: string;
+  weekStartDate?: string;
+  discipline?: "Spins" | "Jumps" | "Edges";
+  completed?: boolean;
+}
+
+export async function getGoalFeedbackFromNeon(id: string): Promise<GoalFeedback | null> {
+  try {
+    return await apiRequest<GoalFeedback>(`/api/goal-feedback/${id}`);
+  } catch (error: any) {
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function queryGoalFeedbackFromNeon(params: GoalFeedbackQueryParams = {}): Promise<GoalFeedback[]> {
+  const search = new URLSearchParams();
+  if (params.containerId) search.set('containerId', params.containerId);
+  if (params.goalId) search.set('goalId', params.goalId);
+  if (params.weekStartDate) search.set('weekStartDate', params.weekStartDate);
+  if (params.discipline) search.set('discipline', params.discipline);
+  if (typeof params.completed === 'boolean') search.set('completed', String(params.completed));
+
+  const query = search.toString();
+  const endpoint = query ? `/api/goal-feedback?${query}` : '/api/goal-feedback';
+  return await apiRequest<GoalFeedback[]>(endpoint);
+}
+
+export async function createGoalFeedbackInNeon(feedback: GoalFeedback): Promise<GoalFeedback> {
+  return await apiRequest<GoalFeedback>('/api/goal-feedback', {
+    method: 'POST',
+    body: JSON.stringify(feedback),
+  });
+}
+
+export async function updateGoalFeedbackInNeon(
+  id: string,
+  updates: Partial<Omit<GoalFeedback, 'id'>>
+): Promise<GoalFeedback> {
+  return await apiRequest<GoalFeedback>(`/api/goal-feedback/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
   });
 }
 

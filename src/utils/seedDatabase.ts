@@ -4,7 +4,7 @@
 import { trainingCoachDB } from '../db/training-coach/db';
 import { progressTrackerDB } from '../db/progress-tracker/db';
 import { Deck } from '../db/training-coach/types';
-import { AppData, Goal, GoalRating } from '../db/progress-tracker/types';
+import { AppData, Goal, GoalFeedback } from '../db/progress-tracker/types';
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -36,7 +36,7 @@ export async function seedDatabase() {
   await trainingCoachDB.decks.clear();
   await progressTrackerDB.goals.clear();
   await progressTrackerDB.appData.clear();
-  await progressTrackerDB.goalRatings.clear();
+  await progressTrackerDB.goalFeedback.clear();
 
   const now = Date.now();
   const baseTimestamp = daysAgo(30); // Start 30 days ago
@@ -222,37 +222,62 @@ export async function seedDatabase() {
   console.log(`✓ Added ${allGoals.length} goals`);
 
   // Goal Ratings for archived goals
-  const goalRatings: GoalRating[] = [
+  const goalById = new Map(allGoals.map(goal => [goal.id, goal]));
+  const goalFeedbackEntries: GoalFeedback[] = [
     {
+      id: generateUUID(),
       goalId: lastWeekPrimaryGoals[0].id,
+      containerId: goalById.get(lastWeekPrimaryGoals[0].id)?.containerId ?? lastWeekPrimaryGoals[0].id,
+      discipline: lastWeekPrimaryGoals[0].discipline,
+      weekStartDate: lastWeekPrimaryGoals[0].weekStartDate,
       rating: 4,
       feedback: 'Made good progress on hip position. Still need to work on entry edge timing.',
-      archivedAt: daysAgo(7),
+      completed: true,
+      createdAt: daysAgo(7),
+      updatedAt: daysAgo(7),
     },
     {
+      id: generateUUID(),
       goalId: lastWeekPrimaryGoals[1].id,
+      containerId: goalById.get(lastWeekPrimaryGoals[1].id)?.containerId ?? lastWeekPrimaryGoals[1].id,
+      discipline: lastWeekPrimaryGoals[1].discipline,
+      weekStartDate: lastWeekPrimaryGoals[1].weekStartDate,
       rating: 3,
       feedback: 'Entry edge improving but knee bend still inconsistent.',
-      archivedAt: daysAgo(7),
+      completed: true,
+      createdAt: daysAgo(7),
+      updatedAt: daysAgo(7),
     },
     {
+      id: generateUUID(),
       goalId: lastWeekWorkingGoals[0].id,
+      containerId: goalById.get(lastWeekWorkingGoals[0].id)?.containerId ?? lastWeekWorkingGoals[0].id,
+      discipline: lastWeekWorkingGoals[0].discipline,
+      weekStartDate: lastWeekWorkingGoals[0].weekStartDate,
       rating: 5,
       feedback: 'Excellent focus on shoulder position. This is now automatic.',
-      archivedAt: daysAgo(7),
+      completed: true,
+      createdAt: daysAgo(7),
+      updatedAt: daysAgo(7),
     },
     {
+      id: generateUUID(),
       goalId: lastWeekWorkingGoals[1].id,
+      containerId: goalById.get(lastWeekWorkingGoals[1].id)?.containerId ?? lastWeekWorkingGoals[1].id,
+      discipline: lastWeekWorkingGoals[1].discipline,
+      weekStartDate: lastWeekWorkingGoals[1].weekStartDate,
       rating: 2,
       feedback: 'Lower back engagement needs more work. Will continue next cycle.',
-      archivedAt: daysAgo(7),
+      completed: true,
+      createdAt: daysAgo(7),
+      updatedAt: daysAgo(7),
     },
   ];
 
-  for (const rating of goalRatings) {
-    await progressTrackerDB.goalRatings.add(rating);
+  for (const entry of goalFeedbackEntries) {
+    await progressTrackerDB.goalFeedback.add(entry);
   }
-  console.log(`✓ Added ${goalRatings.length} goal ratings`);
+  console.log(`✓ Added ${goalFeedbackEntries.length} goal feedback entries`);
 
   // ============================================
   // TRAINING COACH DATA
@@ -921,7 +946,7 @@ export async function seedDatabase() {
   console.log(`- ${allDecks.length} decks`);
   console.log(`- ${totalCards} cards`);
   console.log(`- ${allGoals.length} goals`);
-  console.log(`- ${goalRatings.length} goal ratings`);
+  console.log(`- ${goalFeedbackEntries.length} goal feedback entries`);
   console.log(`- 1 app data entry`);
 }
 

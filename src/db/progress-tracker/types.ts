@@ -13,15 +13,10 @@ export interface Goal {
   content: string;
   containerId?: string;             // For primary goals: containerId === id. For working goals: references primary goal id
   createdAt: number;                // Unix timestamp
+  updatedAt?: number;               // Unix timestamp
   archivedAt?: number;              // Unix timestamp
   weekStartDate?: string;            // ISO date string for the week this goal belongs to
-}
-
-export interface GoalRating {
-  goalId: string;
-  rating: number;                    // 1-10 or similar
-  feedback: string;                  // Text feedback
-  archivedAt: number;                // When this rating was created (during archive)
+  workingGoalIds?: string[];        // Only set on primary goals to preserve ordering of working goals
 }
 
 // Goal Container: Logical grouping of 1 primary goal + 0-2 working goals
@@ -32,4 +27,28 @@ export interface GoalContainer {
   workingGoalIds: string[];         // Max 2 items
   createdAt: number;                // Unix timestamp
   weekStartDate?: string;           // ISO date string for the week this container belongs to
+}
+
+export interface GoalSubmission {
+  id: string;
+  containerId: string;
+  primaryGoalId: string;
+  discipline: "Spins" | "Jumps" | "Edges";
+  weekStartDate?: string;
+  notes: string;
+  submittedAt: number;
+  updatedAt: number;
+}
+
+export interface GoalFeedback {
+  id: string;
+  goalId: string;
+  containerId: string;
+  discipline: "Spins" | "Jumps" | "Edges";
+  weekStartDate?: string;
+  rating?: number;
+  feedback?: string;
+  completed: boolean;
+  createdAt: number;
+  updatedAt: number;
 }

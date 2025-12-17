@@ -97,6 +97,11 @@ export default function Home() {
 
   // Check if there are any containers
   const hasAnyGoals = useMemo(() => {
+    const counts = orderedDisciplines.map(d => ({
+      discipline: d,
+      count: containersByDiscipline[d].length
+    }));
+    logger.info(`[Home] Container counts:`, counts);
     return orderedDisciplines.some(discipline =>
       containersByDiscipline[discipline].length > 0
     );
@@ -202,9 +207,10 @@ export default function Home() {
                           {/* Goal Containers (max 3) */}
                           {containers.length > 0 ? (
                             <div className="space-y-3">
-                              {containers.map(container => (
-                                <GoalContainerDisplay key={container.id} container={container} />
-                              ))}
+                              {containers.map(container => {
+                                logger.info(`[Home] Rendering container ${container.id} for ${discipline}, container data:`, container);
+                                return <GoalContainerDisplay key={container.id} container={container} />;
+                              })}
                             </div>
                           ) : (
                             <p className="text-white/50 text-sm">No goals set</p>
@@ -256,9 +262,10 @@ export default function Home() {
                               {/* Goal Containers (max 3) */}
                               {containers.length > 0 ? (
                                 <div className="space-y-3">
-                                  {containers.map(container => (
-                                    <GoalContainerDisplay key={container.id} container={container} />
-                                  ))}
+                                  {containers.map(container => {
+                                    logger.info(`[Home] Rendering container ${container.id} for ${discipline}`);
+                                    return <GoalContainerDisplay key={container.id} container={container} />;
+                                  })}
                                 </div>
                               ) : (
                                 <p className="text-white/50 text-sm">No goals set</p>
@@ -534,18 +541,61 @@ export default function Home() {
 
 // Component to display a single goal container
 function GoalContainerDisplay({ container }: { container: { id: string; primaryGoalId: string; workingGoalIds: string[] } }) {
+  console.log(`[GoalContainerDisplay] FUNCTION CALLED for container ${container.id}`, container);
+  logger.info(`[GoalContainerDisplay] Component mounted for container ${container.id}`, container);
   const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);
   const [workingGoals, setWorkingGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load primary goal
-    progressTrackerDB.goals.get(container.primaryGoalId).then(g => g ? setPrimaryGoal(g) : null);
-    // Load working goals
-    Promise.all(container.workingGoalIds.map(id => progressTrackerDB.goals.get(id).then(g => g!)))
-      .then(goals => setWorkingGoals(goals.filter(g => g && !g.archivedAt)));
+    console.log(`[GoalContainerDisplay] useEffect REGISTERED for container ${container.id}`, container);
+    logger.info(`[GoalContainerDisplay] useEffect triggered for container ${container.id}`);
+    async function loadGoals() {
+      console.log(`[GoalContainerDisplay] loadGoals() CALLED for container ${container.id}`);
+      setLoading(true);
+      try {
+        logger.info(`[GoalContainerDisplay] Loading container ${container.id}, primaryGoalId: ${container.primaryGoalId}, workingGoalIds: [${container.workingGoalIds.join(', ')}]`);
+
+        // Check if goals exist in IndexedDB
+        const allGoals = await progressTrackerDB.goals.toArray();
+        logger.info(`[GoalContainerDisplay] Total goals in IndexedDB: ${allGoals.length}`);
+        logger.info(`[GoalContainerDisplay] Goal IDs in IndexedDB: [${allGoals.map(g => g.id).join(', ')}]`);
+
+        // Load primary goal
+        const primary = await progressTrackerDB.goals.get(container.primaryGoalId);
+        logger.info(`[GoalContainerDisplay] Primary goal loaded:`, primary ? `"${primary.content}" (id: ${primary.id})` : `NOT FOUND (looking for: ${container.primaryGoalId})`);
+        setPrimaryGoal(primary || null);
+
+        // Load working goals
+        const working = await Promise.all(
+          container.workingGoalIds.map(async (id) => {
+            const goal = await progressTrackerDB.goals.get(id);
+            logger.info(`[GoalContainerDisplay] Working goal ${id}:`, goal ? `"${goal.content}"` : 'NOT FOUND');
+            return goal;
+          })
+        );
+        const validWorking = working.filter((g): g is Goal => g !== undefined && !g.archivedAt);
+        logger.info(`[GoalContainerDisplay] Working goals loaded: ${validWorking.length}/${container.workingGoalIds.length}`);
+        setWorkingGoals(validWorking);
+      } catch (error) {
+        logger.error('[GoalContainerDisplay] Failed to load goals:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    console.log(`[GoalContainerDisplay] About to call loadGoals() for container ${container.id}`);
+    loadGoals();
+    console.log(`[GoalContainerDisplay] loadGoals() called (async, so it's running in background)`);
   }, [container]);
 
-  if (!primaryGoal) return null;
+  if (loading) {
+    return <div className="border-2 border-white/40 rounded p-2 bg-white/5 text-white/50 text-sm">Loading...</div>;
+  }
+
+  if (!primaryGoal) {
+    logger.warn(`[GoalContainerDisplay] Container ${container.id} has no primary goal`);
+    return null;
+  }
 
   return (
     <div className="border-2 border-white/40 rounded p-2 bg-white/5">

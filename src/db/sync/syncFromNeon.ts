@@ -4,7 +4,7 @@ import { getAllDecksFromNeon } from '../training-coach/neon-operations';
 import { trainingCoachDB } from '../training-coach/db';
 import { Deck } from '../training-coach/types';
 import { getAllDecks } from '../training-coach/operations';
-import { getAllGoalsFromNeon, getAppDataFromNeon } from '../progress-tracker/neon-operations';
+import { getAllGoalsFromNeon, getAppDataFromNeon, queryGoalFeedbackFromNeon } from '../progress-tracker/neon-operations';
 import { progressTrackerDB } from '../progress-tracker/db';
 import { Goal, AppData } from '../progress-tracker/types';
 import { getAllGoals } from '../progress-tracker/operations';
@@ -269,6 +269,14 @@ export async function syncAllGoalsFromNeon(): Promise<GoalsSyncResult> {
     if (neonGoals.length > 0) {
       await progressTrackerDB.goals.bulkAdd(neonGoals);
       logger.info(`[Sync] Added ${neonGoals.length} goals to IndexedDB`);
+    }
+
+    // Sync goal feedback entries
+    const neonFeedback = await queryGoalFeedbackFromNeon();
+    await progressTrackerDB.goalFeedback.clear();
+    if (neonFeedback.length > 0) {
+      await progressTrackerDB.goalFeedback.bulkAdd(neonFeedback);
+      logger.info(`[Sync] Added ${neonFeedback.length} goal feedback entries to IndexedDB`);
     }
 
     // Also sync app data

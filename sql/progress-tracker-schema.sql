@@ -17,11 +17,10 @@ CREATE TABLE IF NOT EXISTS goals (
     type TEXT NOT NULL CHECK (type IN ('primary', 'working')),
     content TEXT NOT NULL,
     container_id TEXT,            -- For primary goals: container_id === id. For working goals: references primary goal id
-    created_at BIGINT NOT NULL,  -- Unix timestamp
-    archived_at BIGINT,          -- Unix timestamp (nullable)
-    week_start_date DATE,        -- ISO date string for the week this goal belongs to (nullable)
-    created_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at BIGINT NOT NULL,   -- Unix timestamp (ms) used by the client
+    updated_at BIGINT NOT NULL,   -- Unix timestamp (ms) used by the client
+    archived_at BIGINT,           -- Unix timestamp (ms, nullable)
+    week_start_date DATE          -- ISO date string for the week this goal belongs to (nullable)
 );
 
 -- Indexes for efficient queries
@@ -32,18 +31,37 @@ CREATE INDEX IF NOT EXISTS idx_goals_archived_at ON goals(archived_at) WHERE arc
 CREATE INDEX IF NOT EXISTS idx_goals_discipline_type_active ON goals(discipline, type) WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_goals_container_id ON goals(container_id) WHERE container_id IS NOT NULL;
 
--- Function to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at_db = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+-- Goal submissions table (one per container/week)
+CREATE TABLE IF NOT EXISTS goal_submissions (
+    id TEXT PRIMARY KEY,
+    container_id TEXT NOT NULL,
+    primary_goal_id TEXT NOT NULL,
+    discipline TEXT NOT NULL CHECK (discipline IN ('Spins', 'Jumps', 'Edges')),
+    week_start_date DATE,
+    notes TEXT,
+    submitted_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
 
--- Triggers for updated_at
-CREATE TRIGGER update_app_data_updated_at BEFORE UPDATE ON app_data
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_submissions_container_week ON goal_submissions(container_id, week_start_date);
+CREATE INDEX IF NOT EXISTS idx_goal_submissions_primary_goal ON goal_submissions(primary_goal_id);
 
-CREATE TRIGGER update_goals_updated_at BEFORE UPDATE ON goals
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Goal feedback table (multiple entries per goal/week)
+CREATE TABLE IF NOT EXISTS goal_feedback (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL,
+    container_id TEXT NOT NULL,
+    discipline TEXT NOT NULL CHECK (discipline IN ('Spins', 'Jumps', 'Edges')),
+    week_start_date DATE,
+    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+    feedback TEXT,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_goal_feedback_goal_week ON goal_feedback(goal_id, week_start_date);
+CREATE INDEX IF NOT EXISTS idx_goal_feedback_container_week ON goal_feedback(container_id, week_start_date);
+CREATE INDEX IF NOT EXISTS idx_goal_feedback_completed_week ON goal_feedback(discipline, week_start_date) WHERE completed = TRUE;
+CREATE INDEX IF NOT EXISTS idx_goal_feedback_created_at ON goal_feedback(created_at);
+

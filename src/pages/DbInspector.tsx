@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { getAllDecks, getAllCards } from '../db/training-coach/operations';
 import { Deck, Card } from '../db/training-coach/types';
 import { getAllGoals, getAppData } from '../db/progress-tracker/operations';
-import { Goal, AppData } from '../db/progress-tracker/types';
+import { Goal, AppData, GoalFeedback } from '../db/progress-tracker/types';
 import { progressTrackerDB } from '../db/progress-tracker/db';
 import PageLayout from '../components/PageLayout';
 import LiquidGlassCard from '../components/LiquidGlassCard';
@@ -22,7 +22,7 @@ export default function DbInspector() {
   const [allCards, setAllCards] = useState<Array<Card & { deckId: string; sectionTitle?: string }>>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [appData, setAppData] = useState<AppData | null>(null);
-  const [goalRatings, setGoalRatings] = useState<Array<{ goalId: string; rating: number; feedback: string; archivedAt: number }>>([]);
+  const [goalFeedback, setGoalFeedback] = useState<GoalFeedback[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedDecks, setExpandedDecks] = useState<Set<string>>(new Set());
@@ -52,8 +52,8 @@ export default function DbInspector() {
       const progressAppData = await getAppData();
       setAppData(progressAppData);
 
-      const ratings = await progressTrackerDB.goalRatings.toArray();
-      setGoalRatings(ratings);
+      const feedbackEntries = await progressTrackerDB.goalFeedback.toArray();
+      setGoalFeedback(feedbackEntries);
 
       // Calculate stats
       const totalSections = allDecks.reduce((sum, deck) => sum + (deck.sections?.length || 0), 0);
@@ -220,7 +220,7 @@ export default function DbInspector() {
         <LiquidGlassCard>
           <h2 className="text-xl font-semibold mb-4 text-white">Raw Database JSON</h2>
           <pre className="bg-black/20 p-4 rounded overflow-auto text-xs text-white">
-            {JSON.stringify({ decks, progressTracker: { appData, goals, goalRatings } }, null, 2)}
+            {JSON.stringify({ decks, progressTracker: { appData, goals, goalFeedback } }, null, 2)}
           </pre>
         </LiquidGlassCard>
       ) : (
@@ -386,7 +386,7 @@ export default function DbInspector() {
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-white">Progress Tracker</h3>
                 <p className="text-xs text-white/70 mt-1">
-                  {goals.length} goal{goals.length !== 1 ? 's' : ''} | {goalRatings.length} rating{goalRatings.length !== 1 ? 's' : ''}
+                  {goals.length} goal{goals.length !== 1 ? 's' : ''} | {goalFeedback.length} feedback entr{goalFeedback.length === 1 ? 'y' : 'ies'}
                 </p>
               </div>
               <button className="text-white/70 hover:text-white">
@@ -445,17 +445,24 @@ export default function DbInspector() {
                     </div>
                   </div>
 
-                  {goalRatings.length > 0 && (
+                  {goalFeedback.length > 0 && (
                     <div>
-                      <h4 className="font-medium mb-2 text-white">Goal Ratings ({goalRatings.length})</h4>
+                      <h4 className="font-medium mb-2 text-white">Goal Feedback ({goalFeedback.length})</h4>
                       <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {goalRatings.map((rating, idx) => (
-                          <LiquidGlassCard key={idx}>
-                            <p className="text-white text-sm"><strong>Goal ID:</strong> {rating.goalId}</p>
-                            <p className="text-white text-sm"><strong>Rating:</strong> {rating.rating}/5</p>
-                            {rating.feedback && <p className="text-white text-sm"><strong>Feedback:</strong> {rating.feedback}</p>}
+                        {goalFeedback.map((entry) => (
+                          <LiquidGlassCard key={entry.id}>
+                            <p className="text-white text-sm"><strong>Goal ID:</strong> {entry.goalId}</p>
+                            <p className="text-white text-sm"><strong>Container:</strong> {entry.containerId}</p>
+                            <p className="text-white text-sm">
+                              <strong>Rating:</strong> {entry.rating ? `${entry.rating}/5` : 'Not provided'}
+                            </p>
+                            {entry.feedback && <p className="text-white text-sm"><strong>Feedback:</strong> {entry.feedback}</p>}
+                            <p className="text-white text-sm"><strong>Discipline:</strong> {entry.discipline}</p>
+                            {entry.weekStartDate && (
+                              <p className="text-white text-sm"><strong>Week:</strong> {entry.weekStartDate}</p>
+                            )}
                             <p className="text-xs text-white/70 mt-1">
-                              Archived: {new Date(rating.archivedAt).toLocaleString()}
+                              Updated: {new Date(entry.updatedAt).toLocaleString()}
                             </p>
                           </LiquidGlassCard>
                         ))}

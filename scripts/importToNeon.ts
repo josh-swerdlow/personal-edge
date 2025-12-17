@@ -160,9 +160,7 @@ async function ensureSchema(sql: any) {
         animal TEXT CHECK (animal IN ('bee', 'duck', 'cow', 'rabbit', 'dolphin', 'squid')),
         sections JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at BIGINT NOT NULL,
-        updated_at BIGINT NOT NULL,
-        created_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        updated_at BIGINT NOT NULL
       )
     `;
   } else {
@@ -205,11 +203,11 @@ async function ensureSchema(sql: any) {
     if (!columnNames.includes('updated_at')) {
       await sql`ALTER TABLE decks ADD COLUMN updated_at BIGINT NOT NULL DEFAULT 0`;
     }
-    if (!columnNames.includes('created_at_db')) {
-      await sql`ALTER TABLE decks ADD COLUMN created_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP`;
+    if (columnNames.includes('created_at_db')) {
+      await sql`ALTER TABLE decks DROP COLUMN created_at_db`;
     }
-    if (!columnNames.includes('updated_at_db')) {
-      await sql`ALTER TABLE decks ADD COLUMN updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP`;
+    if (columnNames.includes('updated_at_db')) {
+      await sql`ALTER TABLE decks DROP COLUMN updated_at_db`;
     }
   }
 
@@ -230,24 +228,76 @@ async function ensureSchema(sql: any) {
   await sql`DROP INDEX IF EXISTS idx_decks_sections`;
   await sql`CREATE INDEX idx_decks_sections ON decks USING GIN(sections)`;
 
-  // Create trigger function
-  console.log('  [Neon Import] Creating trigger function...');
-  await sql`
-    CREATE OR REPLACE FUNCTION update_updated_at_column()
-    RETURNS TRIGGER AS $$
-    BEGIN
-      NEW.updated_at_db = CURRENT_TIMESTAMP;
-      RETURN NEW;
-    END;
-    $$ language 'plpgsql'
+  // Remove legacy triggers if present
+  await sql`DROP TRIGGER IF EXISTS update_decks_updated_at ON decks`;
+  await sql`DROP FUNCTION IF EXISTS update_updated_at_column`;
+
+  console.log('  [Neon Import] Ensuring goal_feedback table...');
+  const goalFeedbackExists = await sql`
+    SELECT EXISTS (
+      SELECT FROM information_schema.tables
+      WHERE table_schema = 'public'
+      AND table_name = 'goal_feedback'
+    )
   `;
 
-  // Create trigger
-  await sql`DROP TRIGGER IF EXISTS update_decks_updated_at ON decks`;
-  await sql`
-    CREATE TRIGGER update_decks_updated_at BEFORE UPDATE ON decks
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-  `;
+  if (!goalFeedbackExists[0].exists) {
+    await sql`
+      CREATE TABLE goal_feedback (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        container_id TEXT NOT NULL,
+        discipline TEXT NOT NULL CHECK (discipline IN ('Spins', 'Jumps', 'Edges')),
+        week_start_date DATE,
+        rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+        feedback TEXT,
+        completed BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `;
+  } else {
+    const feedbackColumns = await sql`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+      AND table_name = 'goal_feedback'
+    `;
+    const feedbackColumnNames = feedbackColumns.map((c: any) => c.column_name);
+
+    if (!feedbackColumnNames.includes('goal_id')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN goal_id TEXT NOT NULL DEFAULT ''`;
+    }
+    if (!feedbackColumnNames.includes('container_id')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN container_id TEXT NOT NULL DEFAULT ''`;
+    }
+    if (!feedbackColumnNames.includes('discipline')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN discipline TEXT CHECK (discipline IN ('Spins', 'Jumps', 'Edges'))`;
+    }
+    if (!feedbackColumnNames.includes('week_start_date')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN week_start_date DATE`;
+    }
+    if (!feedbackColumnNames.includes('rating')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN rating INTEGER CHECK (rating BETWEEN 1 AND 5)`;
+    }
+    if (!feedbackColumnNames.includes('feedback')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN feedback TEXT`;
+    }
+    if (!feedbackColumnNames.includes('completed')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN completed BOOLEAN NOT NULL DEFAULT FALSE`;
+    }
+    if (!feedbackColumnNames.includes('created_at')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN created_at BIGINT NOT NULL DEFAULT 0`;
+    }
+    if (!feedbackColumnNames.includes('updated_at')) {
+      await sql`ALTER TABLE goal_feedback ADD COLUMN updated_at BIGINT NOT NULL DEFAULT 0`;
+    }
+  }
+
+  await sql`CREATE INDEX IF NOT EXISTS idx_goal_feedback_goal_week ON goal_feedback(goal_id, week_start_date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_goal_feedback_container_week ON goal_feedback(container_id, week_start_date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_goal_feedback_completed_week ON goal_feedback(discipline, week_start_date) WHERE completed = TRUE`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_goal_feedback_created_at ON goal_feedback(created_at)`;
 
   console.log('✅ [Neon Import] Schema ensured\n');
 }

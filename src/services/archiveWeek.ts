@@ -1,5 +1,12 @@
 import { AppData } from '../db/progress-tracker/types';
-import { getAppData, getWeekStartDate, createGoal, archiveGoal } from '../db/progress-tracker/operations';
+import {
+  getAppData,
+  getWeekStartDate,
+  createGoal,
+  archiveGoal,
+  updateGoal,
+  createGoalFeedbackEntry,
+} from '../db/progress-tracker/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
 
 export interface GoalRatingInput {
@@ -57,49 +64,70 @@ export async function archiveAndPlanWeek({
   const nextWeekStartStr = weekDates.week1;
   const week2StartStr = weekDates.week2;
   const week3StartStr = weekDates.week3;
+  const archivedWeekStart = getWeekStartDate(appData.startDate);
 
-  const now = Date.now();
+  await Promise.all(goalRatings.map(async goal => {
+    const sourceGoal = await progressTrackerDB.goals.get(goal.goalId);
+    if (!sourceGoal) {
+      throw new Error(`Goal ${goal.goalId} not found while recording feedback.`);
+    }
 
-  await Promise.all(goalRatings.map(goal => (
-    progressTrackerDB.goalRatings.add({
+    await createGoalFeedbackEntry({
       goalId: goal.goalId,
+      containerId: sourceGoal.containerId ?? sourceGoal.id,
+      discipline: sourceGoal.discipline,
+      weekStartDate: archivedWeekStart,
       rating: goal.rating,
       feedback: goal.feedback,
-      archivedAt: now,
-    })
-  )));
+      completed: true,
+    });
+  }));
 
   await Promise.all(goalRatings.map(goal => archiveGoal(goal.goalId)));
 
   const trimmedPrimaryGoals = plannedGoals.primary.map(content => content.trim()).filter(Boolean);
-  const trimmedWorkingWeek1 = plannedGoals.workingWeek1.map(content => content.trim()).filter(Boolean);
-  const trimmedWorkingWeek2 = plannedGoals.workingWeek2.map(content => content.trim()).filter(Boolean);
+  const trimmedWorkingWeek1 = plannedGoals.workingWeek1.map(content => content.trim());
+  const trimmedWorkingWeek2 = plannedGoals.workingWeek2.map(content => content.trim());
 
-  await Promise.all([
-    ...trimmedPrimaryGoals.map(content =>
-      createGoal({
-        discipline: focusDiscipline,
-        type: 'primary',
-        content,
-        weekStartDate: week3StartStr,
-      })
-    ),
-    ...trimmedWorkingWeek1.map(content =>
-      createGoal({
-        discipline: focusDiscipline,
-        type: 'working',
-        content,
-        weekStartDate: nextWeekStartStr,
-      })
-    ),
-    ...trimmedWorkingWeek2.map(content =>
-      createGoal({
-        discipline: focusDiscipline,
-        type: 'working',
-        content,
-        weekStartDate: week2StartStr,
-      })
-    ),
-  ]);
+  if (
+    trimmedPrimaryGoals.length !== trimmedWorkingWeek1.length ||
+    trimmedPrimaryGoals.length !== trimmedWorkingWeek2.length
+  ) {
+    throw new Error('Goal card data is misaligned. Please try again.');
+  }
+
+  for (let i = 0; i < trimmedPrimaryGoals.length; i++) {
+    const primaryContent = trimmedPrimaryGoals[i];
+    const step1Content = trimmedWorkingWeek1[i];
+    const step2Content = trimmedWorkingWeek2[i];
+
+    // Create primary goal first
+    const primaryGoal = await createGoal({
+      discipline: focusDiscipline,
+      type: 'primary',
+      content: primaryContent,
+      weekStartDate: week3StartStr,
+    });
+
+    // Ensure primary goal references its own container
+    await updateGoal(primaryGoal.id, { containerId: primaryGoal.id });
+
+    // Create working goals linked to the container
+    await createGoal({
+      discipline: focusDiscipline,
+      type: 'working',
+      content: step1Content,
+      weekStartDate: nextWeekStartStr,
+      containerId: primaryGoal.id,
+    });
+
+    await createGoal({
+      discipline: focusDiscipline,
+      type: 'working',
+      content: step2Content,
+      weekStartDate: week2StartStr,
+      containerId: primaryGoal.id,
+    });
+  }
 }
 

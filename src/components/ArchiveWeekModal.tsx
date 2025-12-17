@@ -1,18 +1,24 @@
-import { useState, useEffect, useReducer, Dispatch, SetStateAction } from 'react';
+import { useState, useEffect, useReducer, useLayoutEffect, useRef } from 'react';
 import { Goal } from '../db/progress-tracker/types';
 import { getActiveGoals, getAppData } from '../db/progress-tracker/operations';
 import { getDisciplineDisplay } from '../utils/disciplines';
 import { archiveAndPlanWeek, computeUpcomingWeekDates, GoalRatingInput, UpcomingWeekDates } from '../services/archiveWeek';
 
 function StarRating({ rating, onRatingChange }: { rating: number | undefined; onRatingChange: (rating: number) => void }) {
+  const [hovered, setHovered] = useState<number | undefined>(undefined);
+  const displayed = hovered ?? rating ?? 0;
+
   return (
-    <div className="flex gap-1">
+    <div className="flex gap-1" onMouseLeave={() => setHovered(undefined)}>
       {[1, 2, 3, 4, 5].map(star => (
         <button
           key={star}
           type="button"
+          onMouseEnter={() => setHovered(star)}
+          onFocus={() => setHovered(star)}
+          onBlur={() => setHovered(undefined)}
           onClick={() => onRatingChange(star)}
-          className={`text-2xl ${star <= (rating || 0) ? 'text-yellow-400' : 'text-gray-300'} hover:text-yellow-400 transition`}
+          className={`text-2xl ${star <= displayed ? 'text-yellow-400' : 'text-gray-300'} hover:text-yellow-400 transition`}
         >
           ★
         </button>
@@ -57,14 +63,6 @@ function goalRatingsReducer(state: GoalRatingsState, action: GoalRatingsAction):
   }
 }
 
-function createLineHandlers(setter: Dispatch<SetStateAction<string[]>>) {
-  return {
-    add: () => setter(prev => [...prev, '']),
-    update: (index: number, value: string) => setter(prev => prev.map((line, idx) => (idx === index ? value : line))),
-    remove: (index: number) => setter(prev => prev.filter((_, idx) => idx !== index)),
-  };
-}
-
 export default function ArchiveWeekModal({
   focusDiscipline,
   onClose,
@@ -76,16 +74,25 @@ export default function ArchiveWeekModal({
   const [goalRatings, dispatchGoalRatings] = useReducer(goalRatingsReducer, {});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [navHeight, setNavHeight] = useState(0);
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  // Step 2 data
-  const [newPrimaryGoals, setNewPrimaryGoals] = useState<string[]>(['']);
-  const [newWorkingGoalsWeek1, setNewWorkingGoalsWeek1] = useState<string[]>(['']);
-  const [newWorkingGoalsWeek2, setNewWorkingGoalsWeek2] = useState<string[]>(['']);
+  // Step 2 data - goal cards
+  type GoalCard = { goal: string; step1: string; step2: string };
+  const [goalCards, setGoalCards] = useState<GoalCard[]>([{ goal: '', step1: '', step2: '' }]);
   const [weekDates, setWeekDates] = useState<UpcomingWeekDates | null>(null);
 
-  const primaryLineHandlers = createLineHandlers(setNewPrimaryGoals);
-  const workingWeek1LineHandlers = createLineHandlers(setNewWorkingGoalsWeek1);
-  const workingWeek2LineHandlers = createLineHandlers(setNewWorkingGoalsWeek2);
+  function updateGoalCard(index: number, field: keyof GoalCard, value: string) {
+    setGoalCards(prev => prev.map((card, idx) => (idx === index ? { ...card, [field]: value } : card)));
+  }
+
+  function addGoalCard() {
+    setGoalCards(prev => (prev.length >= 3 ? prev : [...prev, { goal: '', step1: '', step2: '' }]));
+  }
+
+  function removeGoalCard(index: number) {
+    setGoalCards(prev => prev.filter((_, idx) => idx !== index));
+  }
 
 
   useEffect(() => {
@@ -108,9 +115,7 @@ export default function ArchiveWeekModal({
         });
         dispatchGoalRatings({ type: 'reset', payload: initialRatings });
 
-        setNewPrimaryGoals(['']);
-        setNewWorkingGoalsWeek1(['']);
-        setNewWorkingGoalsWeek2(['']);
+        setGoalCards([{ goal: '', step1: '', step2: '' }]);
 
         // Calculate week dates for step 2
         const appData = await getAppData();
@@ -124,6 +129,28 @@ export default function ArchiveWeekModal({
     loadGoals();
   }, [focusDiscipline]);
 
+  // Measure navbar height so the modal can sit below it and remain fully visible.
+  useLayoutEffect(() => {
+    function updateNavHeight() {
+      const nav = document.querySelector('nav');
+      if (nav) {
+        setNavHeight(nav.getBoundingClientRect().height);
+      }
+    }
+    updateNavHeight();
+    window.addEventListener('resize', updateNavHeight);
+    return () => {
+      window.removeEventListener('resize', updateNavHeight);
+    };
+  }, []);
+
+  // Keep modal scrolled to top on step change.
+  useEffect(() => {
+    if (modalRef.current) {
+      modalRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [step]);
+
   function updateGoalRating(goalId: string, rating: number | undefined, feedback: string) {
     dispatchGoalRatings({ type: 'update', goalId, rating, feedback });
   }
@@ -135,28 +162,52 @@ export default function ArchiveWeekModal({
       const rating = goalRatings[goalId]?.rating;
       return rating === undefined || rating < 1 || rating > 5;
     });
+    const missingFeedback = allGoalIds.filter(goalId => {
+      const feedback = goalRatings[goalId]?.feedback?.trim();
+      return !feedback;
+    });
 
-    if (missingRatings.length > 0) {
-      alert(`Please provide ratings (1-5 stars) for all goals. ${missingRatings.length} goal(s) missing ratings.`);
+    if (missingRatings.length > 0 || missingFeedback.length > 0) {
+      const parts: string[] = [];
+      if (missingRatings.length > 0) {
+        parts.push(`${missingRatings.length} goal(s) missing ratings`);
+      }
+      if (missingFeedback.length > 0) {
+        parts.push(`${missingFeedback.length} goal(s) missing feedback`);
+      }
+      alert(`Please complete all required fields: ${parts.join(', ')}.`);
       return;
     }
 
     setStep(2);
   }
 
+  function handleBackToStep1() {
+    setStep(1);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const plannedPrimaryGoals = newPrimaryGoals.map(goal => goal.trim()).filter(Boolean);
-    if (plannedPrimaryGoals.length === 0) {
-      alert('Please enter at least one primary goal for the next week.');
+    const cleanedCards = goalCards.map(card => ({
+      goal: card.goal.trim(),
+      step1: card.step1.trim(),
+      step2: card.step2.trim(),
+    }));
+
+    // Validation: all fields required on every card, at least one card
+    if (
+      cleanedCards.length === 0 ||
+      cleanedCards.some(card => !card.goal || !card.step1 || !card.step2)
+    ) {
+      alert('Each goal card requires Goal, Step 1, and Step 2. Add at least one card.');
       return;
     }
 
     const plannedGoals = {
-      primary: plannedPrimaryGoals,
-      workingWeek1: newWorkingGoalsWeek1.map(goal => goal.trim()).filter(Boolean),
-      workingWeek2: newWorkingGoalsWeek2.map(goal => goal.trim()).filter(Boolean),
+      primary: cleanedCards.map(c => c.goal),
+      workingWeek1: cleanedCards.map(c => c.step1),
+      workingWeek2: cleanedCards.map(c => c.step2),
     };
 
     const goalsToArchive = [...primaryGoals, ...workingGoals];
@@ -168,10 +219,14 @@ export default function ArchiveWeekModal({
         alert('Please provide ratings (1-5 stars) for all goals before archiving.');
         return;
       }
+      if (!entry.feedback || entry.feedback.trim() === '') {
+        alert('Please provide feedback for all goals before archiving.');
+        return;
+      }
       goalRatingInputs.push({
         goalId: goal.id,
         rating: entry.rating,
-        feedback: entry.feedback || '',
+        feedback: entry.feedback.trim(),
       });
     }
 
@@ -195,20 +250,62 @@ export default function ArchiveWeekModal({
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg p-6">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto"
+        style={{
+          paddingTop: `calc(${navHeight}px + env(safe-area-inset-top, 0px) + 16px)`,
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+          paddingLeft: '16px',
+          paddingRight: '16px',
+        }}
+      >
+        <div
+          className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg"
+          style={{
+            marginTop: 0,
+            maxHeight: `calc(100vh - (${navHeight}px + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 40px))`,
+          }}
+        >
           <p>Loading goals...</p>
         </div>
       </div>
     );
   }
 
+  // Build goal containers for feedback step (primary with its working steps)
+  const goalContainers = primaryGoals.map(primary => ({
+    primary,
+    working: workingGoals.filter(w => w.containerId === primary.id),
+  }));
+
+  const unlinkedWorkingGoals = workingGoals.filter(
+    w => !primaryGoals.some(p => p.id === w.containerId)
+  );
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        <h2 className="text-2xl font-bold mb-4">
-          ✅ Archive {getDisciplineDisplay(focusDiscipline)} Week - Step {step} of 2
-        </h2>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto"
+      style={{
+        paddingTop: `calc(${navHeight}px + env(safe-area-inset-top, 0px) + 16px)`,
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+        paddingLeft: '16px',
+        paddingRight: '16px',
+      }}
+    >
+      <div
+        ref={modalRef}
+        className="bg-white rounded-lg p-6 max-w-3xl w-full overflow-y-auto shadow-xl"
+        style={{
+          marginTop: 0,
+          maxHeight: `calc(100vh - (${navHeight}px + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 40px))`,
+        }}
+      >
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <h2 className="text-2xl font-bold">
+            ✅ Archive {getDisciplineDisplay(focusDiscipline)} Week
+          </h2>
+          <span className="text-sm text-gray-500 mt-1">Step {step} of 2</span>
+        </div>
 
         {step === 1 ? (
           <div className="space-y-6">
@@ -218,85 +315,120 @@ export default function ArchiveWeekModal({
                 Rate how well you did on each goal and provide feedback.
               </p>
 
-              {primaryGoals.length > 0 && (
-                <div className="mb-6">
-                  <h4 className="font-medium mb-2">Primary Goals</h4>
-                  <div className="space-y-3">
-                    {primaryGoals.map(goal => {
-                      const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
-                      return (
-                        <div key={goal.id} className="border border-gray-200 rounded-lg p-4">
-                          <p className="mb-2 font-medium">{goal.content}</p>
+              {goalContainers.length > 0 && (
+                <div className="space-y-4">
+                  {goalContainers.map(container => {
+                    const primaryState = goalRatings[container.primary.id] ?? { rating: undefined, feedback: '' };
+                    return (
+                      <div key={container.primary.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                        <div>
+                          <p className="mb-1 text-xs uppercase text-gray-500">Primary Goal</p>
+                          <p className="mb-2 font-medium">{container.primary.content}</p>
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className="block text-sm text-gray-700 mb-1">
-                                Rating (1-5 stars)
+                                Rating (1-5 stars) <span className="text-red-500">*</span>
                               </label>
                               <StarRating
-                                rating={goalState.rating}
-                                onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                                rating={primaryState.rating}
+                                onRatingChange={(rating) => updateGoalRating(container.primary.id, rating, primaryState.feedback)}
                               />
                             </div>
                             <div>
                               <label className="block text-sm text-gray-700 mb-1">
-                                Feedback
+                                Feedback <span className="text-red-500">*</span>
                               </label>
                               <textarea
-                                value={goalState.feedback}
-                                onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                value={primaryState.feedback}
+                                onChange={(e) => updateGoalRating(container.primary.id, primaryState.rating, e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
                                 rows={2}
                                 placeholder="How did it go?"
                               />
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        {container.working.length > 0 && (
+                          <div className="space-y-3">
+                            <p className="text-xs uppercase text-gray-500">Working Steps</p>
+                            {container.working.map((goal, idx) => {
+                              const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
+                              return (
+                                <div key={goal.id} className="border border-gray-100 rounded-md p-3">
+                                  <p className="mb-2 font-medium">Step {idx + 1}: {goal.content}</p>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <label className="block text-sm text-gray-700 mb-1">
+                                        Rating (1-5 stars) <span className="text-red-500">*</span>
+                                      </label>
+                                      <StarRating
+                                        rating={goalState.rating}
+                                        onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm text-gray-700 mb-1">
+                                        Feedback <span className="text-red-500">*</span>
+                                      </label>
+                                      <textarea
+                                        value={goalState.feedback}
+                                        onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
+                                        rows={2}
+                                        placeholder="How did it go?"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {workingGoals.length > 0 && (
-                <div>
-                  <h4 className="font-medium mb-2">Working Goals</h4>
-                  <div className="space-y-3">
-                    {workingGoals.map(goal => {
-                      const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
-                      return (
-                        <div key={goal.id} className="border border-gray-200 rounded-lg p-4">
-                          <p className="mb-2 font-medium">{goal.content}</p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm text-gray-700 mb-1">
-                                Rating (1-5 stars)
-                              </label>
-                              <StarRating
-                                rating={goalState.rating}
-                                onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm text-gray-700 mb-1">
-                                Feedback
-                              </label>
-                              <textarea
-                                value={goalState.feedback}
-                                onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                rows={2}
-                                placeholder="How did it go?"
-                              />
-                            </div>
+              {unlinkedWorkingGoals.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="font-medium">Additional Working Goals</h4>
+                  {unlinkedWorkingGoals.map(goal => {
+                    const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
+                    return (
+                      <div key={goal.id} className="border border-gray-200 rounded-lg p-4">
+                        <p className="mb-2 font-medium">{goal.content}</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-gray-700 mb-1">
+                              Rating (1-5 stars) <span className="text-red-500">*</span>
+                            </label>
+                            <StarRating
+                              rating={goalState.rating}
+                              onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-gray-700 mb-1">
+                              Feedback <span className="text-red-500">*</span>
+                            </label>
+                            <textarea
+                              value={goalState.feedback}
+                              onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
+                              rows={2}
+                              placeholder="How did it go?"
+                            />
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {primaryGoals.length === 0 && workingGoals.length === 0 && (
+              {goalContainers.length === 0 && unlinkedWorkingGoals.length === 0 && (
                 <p className="text-gray-500">No goals to rate for this week.</p>
               )}
             </div>
@@ -321,123 +453,86 @@ export default function ArchiveWeekModal({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold mb-3">Next Goals</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Set goals for {getDisciplineDisplay(focusDiscipline)} over the next 3 weeks
-              </p>
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold mb-1">Next Goals</h3>
+                <p className="text-sm text-gray-600">
+                  Each goal has two required steps leading up to the next {getDisciplineDisplay(focusDiscipline)} week.
+                </p>
+              </div>
 
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Primary Goals for Next {getDisciplineDisplay(focusDiscipline)} Week [{weekDates ? new Date(weekDates.week3).toLocaleDateString() : ''}] *
-                </label>
-                <div className="space-y-2">
-                  {newPrimaryGoals.map((line, index) => (
-                    <div key={index} className="flex gap-2">
+              <div className="space-y-4">
+                {goalCards.map((card, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="font-medium">Goal {index + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeGoalCard(index)}
+                        className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-300"
+                        disabled={goalCards.length === 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Goal (primary) — target week {weekDates ? new Date(weekDates.week3).toLocaleDateString() : ''} <span className="text-red-500">*</span>
+                      </label>
                       <textarea
-                        value={line}
-                        onChange={(e) => primaryLineHandlers.update(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={card.goal}
+                        onChange={(e) => updateGoalCard(index, 'goal', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         rows={2}
-                        placeholder={`Primary goal ${index + 1}`}
+                        placeholder="What you want to achieve by the next discipline week"
                         required
                       />
-                      {newPrimaryGoals.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => primaryLineHandlers.remove(index)}
-                          className="px-3 py-2 text-red-600 hover:bg-red-50 rounded transition"
-                        >
-                          Remove
-                        </button>
-                      )}
                     </div>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={primaryLineHandlers.add}
-                  className="mt-2 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded transition"
-                >
-                  + Add Primary Goal
-                </button>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Step 1 — week of {weekDates ? new Date(weekDates.week1).toLocaleDateString() : ''} <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={card.step1}
+                        onChange={(e) => updateGoalCard(index, 'step1', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={2}
+                        placeholder="First working step for the upcoming week"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Step 2 — week of {weekDates ? new Date(weekDates.week2).toLocaleDateString() : ''} <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={card.step2}
+                        onChange={(e) => updateGoalCard(index, 'step2', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={2}
+                        placeholder="Second working step for the following week"
+                        required
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Working Goals for {getDisciplineDisplay(focusDiscipline)} [{weekDates ? new Date(weekDates.week1).toLocaleDateString() : ''}]
-                </label>
-                <div className="space-y-2">
-                  {newWorkingGoalsWeek1.map((line, index) => (
-                    <div key={index} className="flex gap-2">
-                      <textarea
-                        value={line}
-                        onChange={(e) => workingWeek1LineHandlers.update(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        rows={2}
-                        placeholder={`Working goal ${index + 1}`}
-                      />
-                      {newWorkingGoalsWeek1.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => workingWeek1LineHandlers.remove(index)}
-                          className="px-3 py-2 text-red-600 hover:bg-red-50 rounded transition"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+              {goalCards.length < 3 && (
                 <button
                   type="button"
-                  onClick={workingWeek1LineHandlers.add}
-                  className="mt-2 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded transition"
+                  onClick={addGoalCard}
+                  className="px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded transition"
                 >
-                  + Add Working Goal
+                  + Add another goal
                 </button>
-              </div>
-
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Working Goals for {getDisciplineDisplay(focusDiscipline)} [{weekDates ? new Date(weekDates.week2).toLocaleDateString() : ''}]
-                </label>
-                <div className="space-y-2">
-                  {newWorkingGoalsWeek2.map((line, index) => (
-                    <div key={index} className="flex gap-2">
-                      <textarea
-                        value={line}
-                        onChange={(e) => workingWeek2LineHandlers.update(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        rows={2}
-                        placeholder={`Working goal ${index + 1}`}
-                      />
-                      {newWorkingGoalsWeek2.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => workingWeek2LineHandlers.remove(index)}
-                          className="px-3 py-2 text-red-600 hover:bg-red-50 rounded transition"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={workingWeek2LineHandlers.add}
-                  className="mt-2 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded transition"
-                >
-                  + Add Working Goal
-                </button>
-              </div>
+              )}
             </div>
 
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => setStep(1)}
+                onClick={handleBackToStep1}
                 className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
                 disabled={submitting}
               >

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Goal, GoalContainer } from '../db/progress-tracker/types';
+import { useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import { Goal, GoalContainer, GoalFeedback } from '../db/progress-tracker/types';
 import {
   getAppData,
   getWeekStartDate,
@@ -10,13 +10,16 @@ import {
   deleteGoalContainer,
   canCreateContainer,
   canAddWorkingGoal,
-  deleteGoal
+  deleteGoal,
+  getGoalFeedbackForContainer,
+  upsertGoalFeedbackEntry
 } from '../db/progress-tracker/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
 import { FaEdit, FaTrash, FaPlus } from 'react-icons/fa';
 import { DISCIPLINES, getDisciplineBadgeClasses, getDisciplineDisplay } from '../utils/disciplines';
 import LiquidGlassCard from './LiquidGlassCard';
 import { logger } from '../utils/logger';
+import ArchiveWeekModal from './ArchiveWeekModal';
 
 interface UnifiedWeekViewProps {
   onGoalUpdate: () => void;
@@ -26,6 +29,7 @@ interface WeekData {
   weekStartDate: string;
   discipline: "Spins" | "Jumps" | "Edges";
   containers: GoalContainer[];
+  isFuture?: boolean;
 }
 
 function formatWeekDate(dateStr: string): string {
@@ -43,6 +47,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [editText, setEditText] = useState('');
   const [appData, setAppData] = useState<{ startDate: string; cycleLength: number } | null>(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveDiscipline, setArchiveDiscipline] = useState<"Spins" | "Jumps" | "Edges" | null>(null);
 
   const disciplines = DISCIPLINES;
 
@@ -110,6 +116,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
           weekStartDate: weekStartStr,
           discipline,
           containers,
+          isFuture: true,
         });
       }
 
@@ -224,6 +231,11 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     }
   }
 
+  function handleSubmitRequest(discipline: "Spins" | "Jumps" | "Edges") {
+    setArchiveDiscipline(discipline);
+    setShowArchiveModal(true);
+  }
+
   async function handleCreateContainer(discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) {
     if (!primaryContent || !primaryContent.trim()) return;
 
@@ -277,10 +289,29 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
 
   return (
     <div className="space-y-6">
+      {showArchiveModal && archiveDiscipline && (
+        <ArchiveWeekModal
+          focusDiscipline={archiveDiscipline}
+          onClose={() => setShowArchiveModal(false)}
+          onSuccess={async () => {
+            await loadCurrentWeek();
+            if (showFuture) {
+              await loadFutureWeeks(true);
+            }
+            if (showPast) {
+              await loadPastWeeks(true);
+            }
+            onGoalUpdate();
+            setShowArchiveModal(false);
+          }}
+        />
+      )}
+
       {/* Current Week */}
       <WeekCard
         week={currentWeek}
         isCurrent={true}
+        isFuture={false}
         formatWeekDate={formatWeekDate}
         getDisciplineDisplay={getDisciplineDisplay}
         onGoalEdit={handleGoalEdit}
@@ -295,6 +326,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         }}
         onCreateContainer={handleCreateContainer}
         onAddWorkingGoal={handleAddWorkingGoal}
+        onSubmitRequest={handleSubmitRequest}
       />
 
       {/* Future Weeks */}
@@ -324,6 +356,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   key={week.weekStartDate}
                   week={week}
                   isCurrent={false}
+                  isPast={false}
+                  isFuture={true}
                   formatWeekDate={formatWeekDate}
                   getDisciplineDisplay={getDisciplineDisplay}
                   onGoalEdit={handleGoalEdit}
@@ -338,6 +372,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   }}
                   onCreateContainer={handleCreateContainer}
                   onAddWorkingGoal={handleAddWorkingGoal}
+                  onSubmitRequest={handleSubmitRequest}
                 />
               ))
             )}
@@ -372,6 +407,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   key={week.weekStartDate}
                   week={week}
                   isCurrent={false}
+                  isPast={true}
+                  isFuture={false}
                   formatWeekDate={formatWeekDate}
                   getDisciplineDisplay={getDisciplineDisplay}
                   onGoalEdit={handleGoalEdit}
@@ -386,6 +423,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   }}
                   onCreateContainer={handleCreateContainer}
                   onAddWorkingGoal={handleAddWorkingGoal}
+                  onSubmitRequest={handleSubmitRequest}
                 />
               ))
             )}
@@ -399,6 +437,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
 interface WeekCardProps {
   week: WeekData;
   isCurrent: boolean;
+  isPast?: boolean;
+  isFuture?: boolean;
   formatWeekDate: (d: string) => string;
   getDisciplineDisplay: (d: "Spins" | "Jumps" | "Edges") => string;
   onGoalEdit: (goal: Goal) => void;
@@ -410,11 +450,14 @@ interface WeekCardProps {
   onCancel: () => void;
   onCreateContainer: (discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) => void;
   onAddWorkingGoal: (containerId: string, content: string) => void;
+  onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges") => void;
 }
 
 function WeekCard({
   week,
   isCurrent,
+  isPast = false,
+  isFuture = false,
   formatWeekDate,
   getDisciplineDisplay,
   onGoalEdit,
@@ -426,12 +469,14 @@ function WeekCard({
   onCancel,
   onCreateContainer,
   onAddWorkingGoal,
+  onSubmitRequest,
 }: WeekCardProps) {
   const [addingContainer, setAddingContainer] = useState(false);
   const [newPrimaryText, setNewPrimaryText] = useState('');
   const [addingWorkingToContainer, setAddingWorkingToContainer] = useState<string | null>(null);
   const [newWorkingText, setNewWorkingText] = useState('');
   const [canCreate, setCanCreate] = useState(true);
+  const readOnly = isPast;
 
   // Check if we can create a new container
   useEffect(() => {
@@ -462,6 +507,12 @@ function WeekCard({
         {isCurrent && (
           <span className="text-xs px-2 py-1 bg-blue-500/30 text-blue-200 rounded">Current</span>
         )}
+        {isPast && (
+          <span className="text-xs px-2 py-1 bg-gray-500/30 text-gray-200 rounded">Past (view only)</span>
+        )}
+        {isFuture && !isCurrent && (
+          <span className="text-xs px-2 py-1 bg-white/20 text-white rounded">Future</span>
+        )}
       </div>
 
       {/* Goal Containers */}
@@ -470,6 +521,8 @@ function WeekCard({
           <GoalContainerCard
             key={container.id}
             container={container}
+            weekStartDate={week.weekStartDate}
+            isFutureWeek={isFuture}
               editingGoal={editingGoal}
               editText={editText}
               setEditText={setEditText}
@@ -482,11 +535,13 @@ function WeekCard({
             setAddingWorkingToContainer={setAddingWorkingToContainer}
             newWorkingText={newWorkingText}
             setNewWorkingText={setNewWorkingText}
+            onSubmitRequest={onSubmitRequest}
+            readOnly={readOnly}
             />
           ))}
 
         {/* Add Container Button */}
-        {addingContainer ? (
+        {!readOnly && (addingContainer ? (
           <div className="border border-white/20 rounded-lg p-3 bg-white/5">
             <h5 className="text-sm font-semibold text-white/90 mb-2">Goal</h5>
               <input
@@ -517,7 +572,8 @@ function WeekCard({
           </button>
         ) : week.containers.length >= 3 ? (
           <p className="text-sm text-white/50 text-center italic">Maximum 3 goal containers per discipline</p>
-        ) : null}
+        ) : null)}
+
       </div>
     </LiquidGlassCard>
   );
@@ -525,6 +581,8 @@ function WeekCard({
 
 interface GoalContainerCardProps {
   container: GoalContainer;
+  weekStartDate: string;
+  isFutureWeek: boolean;
   editingGoal: Goal | null;
   editText: string;
   setEditText: (text: string) => void;
@@ -537,10 +595,14 @@ interface GoalContainerCardProps {
   setAddingWorkingToContainer: (id: string | null) => void;
   newWorkingText: string;
   setNewWorkingText: (text: string) => void;
+  onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges") => void;
+  readOnly?: boolean;
 }
 
 function GoalContainerCard({
   container,
+  weekStartDate,
+  isFutureWeek,
   editingGoal,
   editText,
   setEditText,
@@ -553,10 +615,14 @@ function GoalContainerCard({
   setAddingWorkingToContainer,
   newWorkingText,
   setNewWorkingText,
+  onSubmitRequest,
+  readOnly = false,
 }: GoalContainerCardProps) {
   const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);
   const [workingGoals, setWorkingGoals] = useState<Goal[]>([]);
   const [canAddWorking, setCanAddWorking] = useState(true);
+  const [feedbackEntries, setFeedbackEntries] = useState<GoalFeedback[]>([]);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   useEffect(() => {
     async function loadGoals() {
@@ -583,6 +649,43 @@ function GoalContainerCard({
     loadGoals();
   }, [container]);
 
+  const fetchFeedbackEntries = useCallback(async () => {
+    if (isFutureWeek || !readOnly) {
+      return [] as GoalFeedback[];
+    }
+    return await getGoalFeedbackForContainer(container.id, weekStartDate);
+  }, [container.id, weekStartDate, isFutureWeek, readOnly]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadFeedback() {
+      try {
+        const entries = await fetchFeedbackEntries();
+        if (isMounted) {
+          setFeedbackEntries(entries);
+        }
+      } catch (error) {
+        logger.error('[GoalContainerCard] Failed to load goal feedback:', error);
+        if (isMounted) {
+          setFeedbackEntries([]);
+        }
+      }
+    }
+
+    loadFeedback();
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchFeedbackEntries]);
+
+  const feedbackByGoalId = useMemo(() => {
+    const map: Record<string, GoalFeedback> = {};
+    feedbackEntries.forEach(entry => {
+      map[entry.goalId] = entry;
+    });
+    return map;
+  }, [feedbackEntries]);
+
   async function handleAddWorkingGoal() {
     if (!newWorkingText.trim()) {
       setAddingWorkingToContainer(null);
@@ -594,13 +697,67 @@ function GoalContainerCard({
     setNewWorkingText('');
   }
 
+  const showFeedbackInline = readOnly && !isFutureWeek;
+  const canShowAddWorkingControl = !readOnly && canAddWorking && workingGoals.length < 2;
+  const renderFeedbackSummary = useCallback((entry?: GoalFeedback) => (
+    <p className="mt-2 text-sm text-white/70 italic pl-4 border-l border-white/10">
+      {entry?.feedback ?? 'No feedback recorded.'}
+    </p>
+  ), []);
+
+  const containerGoals = useMemo(() => {
+    if (!primaryGoal) return [];
+    return [primaryGoal, ...workingGoals];
+  }, [primaryGoal, workingGoals]);
+
+  const handleFeedbackModalSaved = useCallback(async () => {
+    const refreshed = await fetchFeedbackEntries();
+    setFeedbackEntries(refreshed);
+    setShowFeedbackModal(false);
+  }, [fetchFeedbackEntries]);
+
+  const workingIndentClass = 'pl-6';
+  const addWorkingControl = canShowAddWorkingControl ? (
+    addingWorkingToContainer === container.id ? (
+      <div className={`${workingIndentClass} mt-1.5`}>
+        <input
+          type="text"
+          value={newWorkingText}
+          onChange={(e) => setNewWorkingText(e.target.value)}
+          className="w-full px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
+          autoFocus
+          placeholder="Enter working goal"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              handleAddWorkingGoal();
+            } else if (e.key === 'Escape') {
+              setAddingWorkingToContainer(null);
+              setNewWorkingText('');
+            }
+          }}
+          onBlur={handleAddWorkingGoal}
+        />
+      </div>
+    ) : (
+      <button
+        type="button"
+        onClick={() => setAddingWorkingToContainer(container.id)}
+        className={`${workingIndentClass} mt-1.5 w-full text-sm text-white/50 italic text-left hover:text-white/80 hover:bg-white/10 px-2 py-2 rounded transition`}
+      >
+        + Add working goal
+      </button>
+    )
+  ) : null;
+
   if (!primaryGoal) return null;
+
+  const primaryFeedback = feedbackByGoalId[primaryGoal.id];
 
   return (
     <div className="border-2 border-white/40 rounded-lg p-3 bg-white/5 group">
       {/* Goal (as header) */}
-      <div className="mb-3">
-        {editingGoal?.id === primaryGoal.id && editingGoal?.type === 'primary' ? (
+      <div className="mb-2">
+        {!readOnly && editingGoal?.id === primaryGoal.id && editingGoal?.type === 'primary' ? (
           <>
             <input
               type="text"
@@ -632,92 +789,126 @@ function GoalContainerCard({
             </div>
           </>
         ) : (
-          <div className="flex items-start justify-between gap-2">
-            <h5
-              className="text-base font-semibold text-white flex-1 cursor-pointer hover:text-white/80"
-              onClick={() => onGoalEdit(primaryGoal)}
-            >
-              {primaryGoal.content}
-            </h5>
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-              <button
-                onClick={() => onGoalEdit(primaryGoal)}
-                className="p-1 text-white/70 hover:text-white hover:bg-white/20 rounded"
-                aria-label="Edit goal"
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex-1">
+              <h5
+                className="text-base font-semibold text-white cursor-pointer hover:text-white/80"
+                onClick={() => {
+                  if (!readOnly) onGoalEdit(primaryGoal);
+                }}
               >
-                <FaEdit size={14} />
-              </button>
-              <button
-                onClick={() => onGoalDelete(primaryGoal.id, true)}
-                className="p-1 text-white/70 hover:text-red-300 hover:bg-red-500/20 rounded"
-                aria-label="Delete goal"
-              >
-                <FaTrash size={14} />
-              </button>
+                {primaryGoal.content}
+              </h5>
+              {showFeedbackInline && renderFeedbackSummary(primaryFeedback)}
+            </div>
+            <div className="flex items-center gap-2">
+              {showFeedbackInline && primaryFeedback?.rating && (
+                <span className="text-sm text-yellow-300 font-semibold whitespace-nowrap">
+                  ★ {primaryFeedback.rating}/5
+                </span>
+              )}
+              {!readOnly && (
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onGoalEdit(primaryGoal)}
+                    className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-blue-200 hover:bg-blue-600/30 rounded transition"
+                    aria-label="Edit goal"
+                  >
+                    <FaEdit size={14} />
+                  </button>
+                  <button
+                    onClick={() => onGoalDelete(primaryGoal.id, true)}
+                    className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-red-300 hover:bg-red-500/30 rounded transition"
+                    aria-label="Delete goal"
+                  >
+                    <FaTrash size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* Working Goals (bullet points, no label) - Reserve space for up to 2 working goals */}
-      <div className="min-h-[4rem]">
+      <div className="w-full">
         {workingGoals.length > 0 && (
-          <ul className="space-y-1">
-            {workingGoals.map(goal => (
-            <GoalItem
-              key={goal.id}
-              goal={goal}
-              editingGoal={editingGoal}
-              editText={editText}
-              setEditText={setEditText}
-              onEdit={() => onGoalEdit(goal)}
-                onDelete={() => {
-                  // Verify this is actually a working goal: working goals have containerId !== id
-                  // Primary goals have containerId === id (their own id)
-                  if (goal.containerId && goal.containerId !== goal.id) {
-                    onGoalDelete(goal.id, false);
-                  } else {
-                    logger.error('Attempted to delete primary goal as working goal', goal);
-                    alert('Error: Cannot delete primary goal from this action. Use the delete button on the goal header.');
-                  }
-                }}
-              onSave={onSave}
-              onCancel={onCancel}
-            />
-          ))}
-          </ul>
+          <ol className="mt-1 space-y-1.5 pl-6 list-decimal marker:text-white/60 text-sm text-white/90">
+            {workingGoals.map(goal => {
+              const feedbackEntry = feedbackByGoalId[goal.id];
+              return (
+                <li key={goal.id} className="space-y-1">
+                  <GoalItem
+                    goal={goal}
+                    editingGoal={editingGoal}
+                    editText={editText}
+                    setEditText={setEditText}
+                    onEdit={() => {
+                      if (!readOnly) onGoalEdit(goal);
+                    }}
+                    onDelete={() => {
+                      if (!readOnly) {
+                        if (goal.containerId && goal.containerId !== goal.id) {
+                          onGoalDelete(goal.id, false);
+                        } else {
+                          logger.error('Attempted to delete primary goal as working goal', goal);
+                          alert('Error: Cannot delete primary goal from this action. Use the delete button on the goal header.');
+                        }
+                      }
+                    }}
+                    onSave={onSave}
+                    onCancel={onCancel}
+                    readOnly={readOnly}
+                    rightContent={
+                      showFeedbackInline && feedbackEntry?.rating ? (
+                        <span className="text-xs text-yellow-300 font-semibold whitespace-nowrap">
+                          ★ {feedbackEntry.rating}/5
+                        </span>
+                      ) : undefined
+                    }
+                  />
+                  {showFeedbackInline && renderFeedbackSummary(feedbackEntry)}
+                </li>
+              );
+            })}
+          </ol>
         )}
+        {addWorkingControl}
       </div>
 
-      {/* Add working goal option */}
-      {addingWorkingToContainer === container.id ? (
-        <div className="mt-2">
-              <input
-                type="text"
-                value={newWorkingText}
-                onChange={(e) => setNewWorkingText(e.target.value)}
-            className="w-full px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white placeholder-white/50"
-                autoFocus
-                placeholder="Enter working goal"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                handleAddWorkingGoal();
-                  } else if (e.key === 'Escape') {
-                setAddingWorkingToContainer(null);
-                    setNewWorkingText('');
-                  }
-                }}
-            onBlur={handleAddWorkingGoal}
-          />
-      </div>
-      ) : canAddWorking && workingGoals.length < 2 ? (
-        <div
-          onClick={() => setAddingWorkingToContainer(container.id)}
-          className="text-sm text-white/50 italic cursor-pointer hover:text-white/80 hover:bg-white/10 p-2 rounded transition mt-2"
-        >
-          + Add working goal
+      {/* Submission / review */}
+      {!readOnly && !isFutureWeek && (
+        <div className="mt-4 border-t border-white/10 pt-3 flex items-center justify-end">
+          <button
+            onClick={() => onSubmitRequest(container.discipline)}
+            className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Submit
+          </button>
         </div>
-      ) : null}
+      )}
+
+      {showFeedbackInline && (
+        <div className="mt-4 border-t border-white/10 pt-3 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setShowFeedbackModal(true)}
+            className="px-3 py-1 text-sm rounded bg-white/20 text-white hover:bg-white/30"
+          >
+            Edit Feedback
+          </button>
+        </div>
+      )}
+
+      {showFeedbackInline && showFeedbackModal && primaryGoal && (
+        <GoalFeedbackModal
+          containerId={container.id}
+          weekStartDate={weekStartDate}
+          goals={containerGoals}
+          feedbackMap={feedbackByGoalId}
+          onClose={() => setShowFeedbackModal(false)}
+          onSaved={handleFeedbackModalSaved}
+        />
+      )}
     </div>
   );
 }
@@ -732,6 +923,8 @@ interface GoalItemProps {
   onSave: () => void;
   onCancel: () => void;
   showDiscipline?: boolean;
+  readOnly?: boolean;
+  rightContent?: ReactNode;
 }
 
 function GoalItem({
@@ -744,20 +937,23 @@ function GoalItem({
   onSave,
   onCancel,
   showDiscipline = false,
+  readOnly = false,
+  rightContent,
 }: GoalItemProps) {
   const isEditing = editingGoal?.id === goal.id;
 
   if (isEditing) {
     return (
-      <li className="flex items-start gap-2 bg-white/10 p-2 rounded">
+      <div className="flex items-center gap-2 bg-white/10 p-2 rounded">
         <input
           type="text"
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
-          className="flex-1 px-2 py-1 border border-white/30 rounded text-sm bg-white/10 text-white"
+          className="flex-1 h-10 px-3 border border-white/30 rounded text-sm bg-white/10 text-white"
           autoFocus
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
+              e.preventDefault();
               onSave();
             } else if (e.key === 'Escape') {
               onCancel();
@@ -766,45 +962,239 @@ function GoalItem({
         />
         <button
           onClick={onSave}
-          className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+          className="h-10 px-4 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
         >
           Save
         </button>
         <button
           onClick={onCancel}
-          className="px-2 py-1 text-sm bg-white/20 text-white rounded hover:bg-white/30"
+          className="h-10 px-4 text-sm bg-white/20 text-white rounded hover:bg-white/30"
         >
           Cancel
         </button>
-      </li>
+      </div>
     );
   }
 
   return (
-    <li className="flex items-start gap-2 group">
-      <span className="text-sm text-white flex-1 cursor-pointer" onClick={onEdit}>
+    <div className="flex items-center gap-2 group">
+      <span
+        className={`text-sm text-white flex-1 ${readOnly ? '' : 'cursor-pointer'}`}
+        onClick={() => {
+          if (!readOnly) onEdit();
+        }}
+      >
         {showDiscipline && (
           <span className="text-xs text-white/60 mr-2">[{goal.discipline}]</span>
         )}
         {goal.content}
       </span>
-      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-        <button
-          onClick={onEdit}
-          className="p-1 text-white/70 hover:text-white hover:bg-white/20 rounded"
-          aria-label="Edit goal"
-        >
-          <FaEdit size={14} />
-        </button>
-        <button
-          onClick={onDelete}
-          className="p-1 text-white/70 hover:text-red-300 hover:bg-red-500/20 rounded"
-          aria-label="Delete goal"
-        >
-          <FaTrash size={14} />
-        </button>
+      {rightContent}
+      {!readOnly && (
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+          <button
+            onClick={onEdit}
+            className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-blue-200 hover:bg-blue-600/30 rounded transition"
+            aria-label="Edit goal"
+          >
+            <FaEdit size={14} />
+          </button>
+          <button
+            onClick={onDelete}
+            className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-red-300 hover:bg-red-500/30 rounded transition"
+            aria-label="Delete goal"
+          >
+            <FaTrash size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface GoalFeedbackModalProps {
+  containerId: string;
+  weekStartDate?: string;
+  goals: Goal[];
+  feedbackMap: Record<string, GoalFeedback | undefined>;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function GoalFeedbackModal({
+  containerId,
+  weekStartDate,
+  goals,
+  feedbackMap,
+  onClose,
+  onSaved,
+}: GoalFeedbackModalProps) {
+  const [entries, setEntries] = useState<Record<string, { rating?: number; feedback: string }>>(() => {
+    const initial: Record<string, { rating?: number; feedback: string }> = {};
+    goals.forEach(goal => {
+      const existing = feedbackMap[goal.id];
+      initial[goal.id] = {
+        rating: existing?.rating,
+        feedback: existing?.feedback ?? '',
+      };
+    });
+    return initial;
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const updated: Record<string, { rating?: number; feedback: string }> = {};
+    goals.forEach(goal => {
+      const existing = feedbackMap[goal.id];
+      updated[goal.id] = {
+        rating: existing?.rating,
+        feedback: existing?.feedback ?? '',
+      };
+    });
+    setEntries(updated);
+  }, [goals, feedbackMap]);
+
+  function updateEntry(goalId: string, updates: Partial<{ rating?: number; feedback: string }>) {
+    setEntries(prev => ({
+      ...prev,
+      [goalId]: {
+        rating: updates.rating !== undefined ? updates.rating : prev[goalId]?.rating,
+        feedback: updates.feedback !== undefined ? updates.feedback : prev[goalId]?.feedback ?? '',
+      },
+    }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await Promise.all(
+        goals.map(async goal => {
+          const state = entries[goal.id] ?? {};
+          const effectiveWeek = weekStartDate || goal.weekStartDate;
+          await upsertGoalFeedbackEntry({
+            goalId: goal.id,
+            containerId,
+            discipline: goal.discipline,
+            weekStartDate: effectiveWeek,
+            rating: state.rating,
+            feedback: state.feedback?.trim() || undefined,
+            completed: true,
+          });
+        })
+      );
+      await onSaved();
+    } catch (error: any) {
+      logger.error('[GoalFeedbackModal] Failed to save feedback:', error);
+      alert(error?.message || 'Failed to save feedback. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center overflow-y-auto p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Edit Feedback</h2>
+            <p className="text-sm text-gray-500">
+              Update the star rating and notes for each goal in this container.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          {goals.map(goal => {
+            const entry = entries[goal.id] ?? { rating: undefined, feedback: '' };
+            return (
+              <div key={goal.id} className="border border-gray-200 rounded-md p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {goal.type === 'primary' ? 'Primary Goal' : 'Working Goal'}
+                  </p>
+                  <p className="text-sm text-gray-600">{goal.content}</p>
+                </div>
+                <StarRatingInput
+                  value={entry.rating}
+                  onChange={value => updateEntry(goal.id, { rating: value })}
+                />
+                <textarea
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900"
+                  rows={3}
+                  placeholder="Add feedback..."
+                  value={entry.feedback}
+                  onChange={(e) => updateEntry(goal.id, { feedback: e.target.value })}
+                />
+              </div>
+            );
+          })}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-md border border-gray-300 text-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save Feedback'}
+            </button>
+          </div>
+        </form>
       </div>
-    </li>
+    </div>
+  );
+}
+
+interface StarRatingInputProps {
+  value?: number;
+  onChange: (value?: number) => void;
+}
+
+function StarRatingInput({ value, onChange }: StarRatingInputProps) {
+  const stars = [1, 2, 3, 4, 5];
+  const [hovered, setHovered] = useState<number | undefined>(undefined);
+  const displayed = hovered ?? value;
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex gap-1">
+        {stars.map(star => (
+          <button
+            key={star}
+            type="button"
+            className={`text-xl ${displayed && star <= displayed ? 'text-yellow-400' : 'text-gray-300'} hover:text-yellow-300`}
+            onMouseEnter={() => setHovered(star)}
+            onMouseLeave={() => setHovered(undefined)}
+            onFocus={() => setHovered(star)}
+            onBlur={() => setHovered(undefined)}
+            onClick={() => onChange(star)}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="text-xs text-gray-500 underline hover:text-gray-700"
+        onClick={() => onChange(undefined)}
+      >
+        Clear
+      </button>
+    </div>
   );
 }
 

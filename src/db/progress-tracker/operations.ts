@@ -1,14 +1,23 @@
 import { progressTrackerDB } from './db';
-import { AppData, Goal, GoalContainer } from './types';
+import { AppData, Goal, GoalContainer, GoalFeedback, GoalSubmission } from './types';
 import { DISCIPLINES } from '../../utils/disciplines';
 import {
   createGoalInNeon,
   updateGoalInNeon,
   deleteGoalInNeon,
   updateAppDataInNeon,
+  createGoalSubmissionInNeon,
+  updateGoalSubmissionInNeon,
+  getGoalSubmissionByContainerFromNeon,
+  getGoalSubmissionFromNeon,
+  createGoalFeedbackInNeon,
+  updateGoalFeedbackInNeon,
+  getGoalFeedbackFromNeon,
+  queryGoalFeedbackFromNeon,
 } from './neon-operations';
 import { syncGoalFromNeon, syncAppDataFromNeon } from '../sync/syncFromNeon';
 import { NetworkError, withRetry } from '../../utils/errorHandler';
+import { logger } from '../../utils/logger';
 
 // Simple UUID v4 generator for browser
 function generateUUID(): string {
@@ -127,6 +136,74 @@ async function writeGoalToNeonAndSync(
   }
 }
 
+async function writeSubmissionToNeonAndSync(
+  writeFn: () => Promise<GoalSubmission>,
+  submissionId: string
+): Promise<GoalSubmission> {
+  if (!isNeonAvailable()) {
+    return await writeFn();
+  }
+
+  try {
+    const submission = await withRetry(writeFn, {
+      maxRetries: 3,
+      retryDelay: 1000,
+    });
+
+    await syncGoalSubmissionFromNeon(submissionId);
+    return submission;
+  } catch (error: any) {
+    if (isNetworkError(error)) {
+      throw new NetworkError(
+        'Failed to save submission. Please check your internet connection and try again.',
+        error
+      );
+    }
+    throw error;
+  }
+}
+
+function isFutureWeekDate(weekStartDate?: string): boolean {
+  if (!weekStartDate) return false;
+  const weekDate = new Date(`${weekStartDate}T00:00:00Z`);
+  const now = new Date();
+  return weekDate.getTime() > now.getTime();
+}
+
+function assertWeekIsNotInFuture(weekStartDate?: string): void {
+  if (!weekStartDate) return;
+  if (isFutureWeekDate(weekStartDate)) {
+    throw new Error('Cannot submit feedback for a future week.');
+  }
+}
+
+async function writeFeedbackToNeonAndSync(
+  writeFn: () => Promise<GoalFeedback>,
+  feedbackId: string
+): Promise<GoalFeedback> {
+  if (!isNeonAvailable()) {
+    return await writeFn();
+  }
+
+  try {
+    const entry = await withRetry(writeFn, {
+      maxRetries: 3,
+      retryDelay: 1000,
+    });
+
+    await syncGoalFeedbackFromNeon(feedbackId);
+    return entry;
+  } catch (error: any) {
+    if (isNetworkError(error)) {
+      throw new NetworkError(
+        'Failed to save feedback. Please check your internet connection and try again.',
+        error
+      );
+    }
+    throw error;
+  }
+}
+
 // Helper to write app data to Neon and sync back to IndexedDB
 async function writeAppDataToNeonAndSync(
   writeFn: () => Promise<AppData>
@@ -231,15 +308,35 @@ export async function updateGoal(id: string, updates: Partial<Omit<Goal, 'id' | 
     throw new Error(`Goal ${id} not found`);
   }
 
+  const updatedAt = Date.now();
   const updated: Goal = {
     ...goal,
     ...updates,
+    updatedAt,
   };
 
   return await writeGoalToNeonAndSync(
     async () => {
       if (isNeonAvailable()) {
-        return await updateGoalInNeon(id, updates);
+        try {
+          return await updateGoalInNeon(id, { ...updates, updatedAt });
+        } catch (error: any) {
+          const message = error?.message?.toLowerCase?.() || '';
+          const is404 = message.includes('404') || message.includes('not found');
+          if (is404) {
+            const goalPayload = {
+              id: updated.id,
+              discipline: updated.discipline,
+              type: updated.type,
+              content: updated.content,
+              containerId: updated.containerId,
+              archivedAt: updated.archivedAt,
+              weekStartDate: updated.weekStartDate,
+            };
+            return await createGoalInNeon(goalPayload);
+          }
+          throw error;
+        }
       } else {
         await progressTrackerDB.goals.update(id, updated);
         return updated;
@@ -375,21 +472,53 @@ export async function getGoalContainersByDiscipline(
   discipline: "Spins" | "Jumps" | "Edges",
   weekStartDate?: string
 ): Promise<GoalContainer[]> {
-  // Get all primary goals for this discipline
-  let primaryGoals = await progressTrackerDB.goals
+  logger.info(`[getGoalContainersByDiscipline] Loading containers for ${discipline}${weekStartDate ? ` (week: ${weekStartDate})` : ' (all weeks)'}`);
+
+  // Get all goals for this discipline, then filter in memory
+  // This is more reliable than complex Dexie queries
+  let allGoals = await progressTrackerDB.goals
     .where('discipline')
     .equals(discipline)
-    .and(g => g.type === 'primary' && !g.archivedAt)
     .toArray();
+
+  logger.info(`[getGoalContainersByDiscipline] Found ${allGoals.length} total goals for ${discipline}`);
+
+  // Filter to primary goals that are not archived
+  let primaryGoals = allGoals.filter(g =>
+    g.type === 'primary' && !g.archivedAt
+  );
+
+  logger.info(`[getGoalContainersByDiscipline] Found ${primaryGoals.length} active primary goals for ${discipline}`);
 
   // Filter by weekStartDate if provided
   const normalizedTarget = normalizeWeekStartDate(weekStartDate);
   if (normalizedTarget) {
-    primaryGoals = primaryGoals.filter(g => {
-      const normalizedGoalWeek = normalizeWeekStartDate(g.weekStartDate);
-      // Include goals that match the target week OR goals without a weekStartDate (legacy goals)
-      return normalizedGoalWeek === normalizedTarget || !normalizedGoalWeek;
-    });
+    const beforeFilter = primaryGoals.length;
+    const targetDate = new Date(`${normalizedTarget}T00:00:00Z`);
+
+    logger.info(`[getGoalContainersByDiscipline] Filtering ${beforeFilter} primary goals for week ${normalizedTarget}`);
+
+    const isWithinTargetWeek = (goal: Goal) => {
+      const normalizedGoalWeek = normalizeWeekStartDate(goal.weekStartDate);
+      // Treat missing weekStartDate as matching for legacy data
+      if (!normalizedGoalWeek) {
+        logger.info(`[getGoalContainersByDiscipline] Goal "${goal.content}" has no weekStartDate; keeping (legacy)`);
+        return true;
+      }
+
+      const goalDate = new Date(`${normalizedGoalWeek}T00:00:00Z`);
+      const diffDays = Math.floor((goalDate.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24));
+      const matches = diffDays >= 0 && diffDays < 7; // same 7-day window as target week
+
+      logger.info(
+        `[getGoalContainersByDiscipline] Goal "${goal.content}" has weekStartDate: ${goal.weekStartDate} (normalized: ${normalizedGoalWeek}), diffDays=${diffDays}, matchesTargetWeek=${matches}`
+      );
+
+      return matches;
+    };
+
+    primaryGoals = primaryGoals.filter(isWithinTargetWeek);
+    logger.info(`[getGoalContainersByDiscipline] Filtered to ${primaryGoals.length} primary goals for week ${normalizedTarget} (from ${beforeFilter})`);
   }
   // If no weekStartDate provided, return ALL active containers (current + future weeks)
 
@@ -397,15 +526,22 @@ export async function getGoalContainersByDiscipline(
   const containers: GoalContainer[] = [];
   for (const primaryGoal of primaryGoals) {
     // Get working goals for this container
-    const workingGoals = await progressTrackerDB.goals
+    // Query by containerId, then filter in memory for reliability
+    const containerGoals = await progressTrackerDB.goals
       .where('containerId')
       .equals(primaryGoal.id)
-      .and(g => !g.archivedAt)
       .toArray();
 
+    // Filter to working goals that are not archived
+    const workingGoals = containerGoals.filter(g =>
+      g.type === 'working' && !g.archivedAt && g.containerId === primaryGoal.id
+    );
+
+    logger.info(`[getGoalContainersByDiscipline] Built container for "${primaryGoal.content}" with ${workingGoals.length} working goals`);
     containers.push(buildGoalContainer(primaryGoal, workingGoals));
   }
 
+  logger.info(`[getGoalContainersByDiscipline] Returning ${containers.length} containers for ${discipline}`);
   // Sort by creation date (newest first)
   return containers.sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -490,7 +626,7 @@ export async function addWorkingGoalToContainer(
   const existingWorkingGoals = await progressTrackerDB.goals
     .where('containerId')
     .equals(containerId)
-    .and(g => !g.archivedAt)
+    .and(g => !g.archivedAt && g.type === 'working')
     .toArray();
 
   if (existingWorkingGoals.length >= 2) {
@@ -508,7 +644,18 @@ export async function addWorkingGoalToContainer(
     weekStartDate: primaryGoal.weekStartDate,
   };
 
-  await progressTrackerDB.goals.add(workingGoal);
+  await progressTrackerDB.transaction('rw', progressTrackerDB.goals, async () => {
+    await progressTrackerDB.goals.add(workingGoal);
+    const primaryGoal = await progressTrackerDB.goals.get(containerId);
+    if (primaryGoal) {
+      const existingIds = Array.isArray(primaryGoal.workingGoalIds) ? primaryGoal.workingGoalIds : [];
+      const updatedIds = [
+        ...existingIds.filter((goalId: string) => goalId !== workingGoal.id),
+        workingGoal.id,
+      ];
+      await progressTrackerDB.goals.update(containerId, { workingGoalIds: updatedIds, updatedAt: Date.now() });
+    }
+  });
   return workingGoal;
 }
 
@@ -543,10 +690,280 @@ export async function canAddWorkingGoal(containerId: string): Promise<boolean> {
   const workingGoals = await progressTrackerDB.goals
     .where('containerId')
     .equals(containerId)
-    .and(g => !g.archivedAt)
+    .and(g => !g.archivedAt && g.type === 'working')
     .toArray();
 
   return workingGoals.length < 2;
+}
+
+// Goal submissions
+async function syncGoalSubmissionFromNeon(submissionId: string): Promise<GoalSubmission | null> {
+  const submission = await getGoalSubmissionFromNeon(submissionId);
+  if (submission) {
+    await progressTrackerDB.goalSubmissions.put(submission);
+  }
+  return submission;
+}
+
+async function syncGoalFeedbackFromNeon(feedbackId: string): Promise<GoalFeedback | null> {
+  const entry = await getGoalFeedbackFromNeon(feedbackId);
+  if (entry) {
+    await progressTrackerDB.goalFeedback.put(entry);
+  }
+  return entry;
+}
+
+export async function getGoalSubmissionForContainer(
+  containerId: string,
+  weekStartDate?: string
+): Promise<GoalSubmission | null> {
+  const targetWeek = normalizeWeekStartDate(weekStartDate);
+
+  const local = await progressTrackerDB.goalSubmissions
+    .where('containerId')
+    .equals(containerId)
+    .and(sub => normalizeWeekStartDate(sub.weekStartDate) === targetWeek)
+    .first();
+
+  if (local) {
+    return local;
+  }
+
+  if (!isNeonAvailable()) return null;
+
+  const remote = await getGoalSubmissionByContainerFromNeon(containerId, targetWeek);
+  if (remote) {
+    await progressTrackerDB.goalSubmissions.put(remote);
+  }
+
+  return remote;
+}
+
+export interface GoalSubmissionInput {
+  containerId: string;
+  primaryGoalId: string;
+  discipline: "Spins" | "Jumps" | "Edges";
+  weekStartDate?: string;
+  notes: string;
+}
+
+export async function upsertGoalSubmission(input: GoalSubmissionInput): Promise<GoalSubmission> {
+  const targetWeek = normalizeWeekStartDate(input.weekStartDate);
+  const existing = await getGoalSubmissionForContainer(input.containerId, targetWeek);
+  const now = Date.now();
+
+  if (existing) {
+    const updated: GoalSubmission = {
+      ...existing,
+      weekStartDate: targetWeek ?? existing.weekStartDate,
+      notes: input.notes.trim(),
+      updatedAt: now,
+    };
+
+    return await writeSubmissionToNeonAndSync(
+      async () => {
+        if (isNeonAvailable()) {
+          return await updateGoalSubmissionInNeon(updated.id, {
+            containerId: updated.containerId,
+            primaryGoalId: updated.primaryGoalId,
+            discipline: updated.discipline,
+            weekStartDate: updated.weekStartDate,
+            notes: updated.notes,
+            submittedAt: updated.submittedAt,
+            updatedAt: updated.updatedAt,
+          });
+        }
+
+        await progressTrackerDB.goalSubmissions.put(updated);
+        return updated;
+      },
+      updated.id
+    );
+  }
+
+  const submission: GoalSubmission = {
+    id: generateUUID(),
+    containerId: input.containerId,
+    primaryGoalId: input.primaryGoalId,
+    discipline: input.discipline,
+    weekStartDate: targetWeek,
+    notes: input.notes.trim(),
+    submittedAt: now,
+    updatedAt: now,
+  };
+
+  return await writeSubmissionToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await createGoalSubmissionInNeon(submission);
+      }
+
+      await progressTrackerDB.goalSubmissions.add(submission);
+      return submission;
+    },
+    submission.id
+  );
+}
+
+export interface GoalFeedbackInput {
+  goalId: string;
+  containerId: string;
+  discipline: "Spins" | "Jumps" | "Edges";
+  weekStartDate?: string;
+  rating?: number;
+  feedback?: string;
+  completed?: boolean;
+}
+
+export async function createGoalFeedbackEntry(input: GoalFeedbackInput): Promise<GoalFeedback> {
+  const now = Date.now();
+  const normalizedWeek = normalizeWeekStartDate(input.weekStartDate);
+  assertWeekIsNotInFuture(normalizedWeek);
+
+  const entry: GoalFeedback = {
+    id: generateUUID(),
+    goalId: input.goalId,
+    containerId: input.containerId,
+    discipline: input.discipline,
+    weekStartDate: normalizedWeek,
+    rating: input.rating,
+    feedback: input.feedback?.trim() || undefined,
+    completed: input.completed ?? false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return await writeFeedbackToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await createGoalFeedbackInNeon(entry);
+      }
+      await progressTrackerDB.goalFeedback.add(entry);
+      return entry;
+    },
+    entry.id
+  );
+}
+
+export async function updateGoalFeedbackEntry(
+  id: string,
+  updates: Partial<Omit<GoalFeedbackInput, 'goalId'>> & { rating?: number; feedback?: string; completed?: boolean }
+): Promise<GoalFeedback> {
+  const existing = await progressTrackerDB.goalFeedback.get(id);
+  if (!existing) {
+    throw new Error(`Goal feedback ${id} not found.`);
+  }
+
+  const updated: GoalFeedback = {
+    ...existing,
+    ...updates,
+    weekStartDate: updates.weekStartDate
+      ? normalizeWeekStartDate(updates.weekStartDate)
+      : existing.weekStartDate,
+    rating: updates.rating ?? existing.rating,
+    feedback: updates.feedback?.trim() ?? existing.feedback,
+    completed: updates.completed ?? existing.completed,
+    updatedAt: Date.now(),
+  };
+  assertWeekIsNotInFuture(updated.weekStartDate);
+
+  return await writeFeedbackToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await updateGoalFeedbackInNeon(id, {
+          goalId: updated.goalId,
+          containerId: updated.containerId,
+          discipline: updated.discipline,
+          weekStartDate: updated.weekStartDate,
+          rating: updated.rating,
+          feedback: updated.feedback,
+          completed: updated.completed,
+          updatedAt: updated.updatedAt,
+        });
+      }
+
+      await progressTrackerDB.goalFeedback.put(updated);
+      return updated;
+    },
+    id
+  );
+}
+
+export async function getGoalFeedbackForContainer(
+  containerId: string,
+  weekStartDate?: string
+): Promise<GoalFeedback[]> {
+  const targetWeek = normalizeWeekStartDate(weekStartDate);
+  const local = await progressTrackerDB.goalFeedback
+    .where('containerId')
+    .equals(containerId)
+    .filter(entry => {
+      if (!targetWeek) return true;
+      return normalizeWeekStartDate(entry.weekStartDate) === targetWeek;
+    })
+    .toArray();
+
+  if (local.length > 0 || !isNeonAvailable()) {
+    return local.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  const remote = await queryGoalFeedbackFromNeon({
+    containerId,
+    weekStartDate: targetWeek,
+  });
+
+  if (remote.length > 0) {
+    await progressTrackerDB.goalFeedback.bulkPut(remote);
+  }
+
+  return remote;
+}
+
+export async function listGoalFeedbackForWeek(weekStartDate: string): Promise<GoalFeedback[]> {
+  const targetWeek = normalizeWeekStartDate(weekStartDate);
+  if (!targetWeek) return [];
+
+  const local = await progressTrackerDB.goalFeedback
+    .where('weekStartDate')
+    .equals(targetWeek)
+    .toArray();
+
+  if (local.length > 0 || !isNeonAvailable()) {
+    return local.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  const remote = await queryGoalFeedbackFromNeon({ weekStartDate: targetWeek });
+  if (remote.length > 0) {
+    await progressTrackerDB.goalFeedback.bulkPut(remote);
+  }
+
+  return remote;
+}
+
+export async function getAllGoalFeedback(): Promise<GoalFeedback[]> {
+  return await progressTrackerDB.goalFeedback.orderBy('createdAt').reverse().toArray();
+}
+
+export async function upsertGoalFeedbackEntry(input: GoalFeedbackInput): Promise<GoalFeedback> {
+  const normalizedWeek = normalizeWeekStartDate(input.weekStartDate);
+  const existing = await progressTrackerDB.goalFeedback
+    .where('goalId')
+    .equals(input.goalId)
+    .filter(entry => normalizeWeekStartDate(entry.weekStartDate) === normalizedWeek)
+    .first();
+
+  if (existing) {
+    return await updateGoalFeedbackEntry(existing.id, {
+      containerId: input.containerId,
+      discipline: input.discipline,
+      weekStartDate: normalizedWeek,
+      rating: input.rating,
+      feedback: input.feedback,
+      completed: input.completed,
+    });
+  }
+
+  return await createGoalFeedbackEntry({ ...input, weekStartDate: normalizedWeek });
 }
 
 // Migration: Convert existing goals to goal containers

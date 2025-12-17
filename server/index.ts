@@ -28,7 +28,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { neon } from '@neondatabase/serverless';
 import { Deck } from '../src/db/training-coach/types';
-import { Goal, AppData } from '../src/db/progress-tracker/types';
+import { Goal, AppData, GoalSubmission, GoalFeedback } from '../src/db/progress-tracker/types';
 
 const app = express();
 app.use(cors());
@@ -41,6 +41,89 @@ if (!databaseUrl) {
 }
 
 const sql = neon(databaseUrl);
+
+const toMillis = (value: any): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  if (value instanceof Date) return value.getTime();
+  return undefined;
+};
+
+const toMillisOrNow = (value: any): number => toMillis(value) ?? Date.now();
+
+const goalRowToGoal = (row: any): Goal => ({
+  id: row.id,
+  discipline: row.discipline,
+  type: row.type,
+  content: row.content,
+  containerId: row.container_id || undefined,
+  createdAt: toMillisOrNow(row.created_at),
+  updatedAt: toMillis(row.updated_at) ?? Date.now(),
+  archivedAt: toMillis(row.archived_at),
+  weekStartDate: row.week_start_date || undefined,
+});
+
+const submissionRowToSubmission = (row: any): GoalSubmission => ({
+  id: row.id,
+  containerId: row.container_id,
+  primaryGoalId: row.primary_goal_id,
+  discipline: row.discipline,
+  weekStartDate: row.week_start_date || undefined,
+  notes: row.notes || '',
+  submittedAt: toMillisOrNow(row.submitted_at),
+  updatedAt: toMillisOrNow(row.updated_at),
+});
+
+const feedbackRowToGoalFeedback = (row: any): GoalFeedback => ({
+  id: row.id,
+  goalId: row.goal_id,
+  containerId: row.container_id,
+  discipline: row.discipline,
+  weekStartDate: row.week_start_date || undefined,
+  rating: row.rating === null || row.rating === undefined ? undefined : Number(row.rating),
+  feedback: row.feedback || undefined,
+  completed: row.completed ?? false,
+  createdAt: toMillisOrNow(row.created_at),
+  updatedAt: toMillisOrNow(row.updated_at),
+});
+
+function validateRating(rating: any): number | undefined {
+  if (rating === null || rating === undefined || rating === '') {
+    return undefined;
+  }
+
+  const parsed = Number(rating);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    throw new Error('Rating must be an integer between 1 and 5.');
+  }
+  if (parsed < 1 || parsed > 5) {
+    throw new Error('Rating must be between 1 and 5.');
+  }
+  return parsed;
+}
+
+function normalizeWeekString(value: any): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+  const str = String(value);
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : undefined;
+}
+
+function ensureWeekNotFuture(weekStartDate?: string) {
+  if (!weekStartDate) return;
+  const weekDate = new Date(`${weekStartDate}T00:00:00Z`);
+  if (weekDate.getTime() > Date.now()) {
+    throw new Error('Cannot submit feedback for a future week.');
+  }
+}
 
 // Get all decks
 app.get('/api/decks', async (_req: Request, res: Response) => {
@@ -198,16 +281,7 @@ app.get('/api/goals', async (_req: Request, res: Response) => {
       ORDER BY created_at DESC
     `;
 
-    const goals = result.map((row: any) => ({
-      id: row.id,
-      discipline: row.discipline,
-      type: row.type,
-      content: row.content,
-      containerId: row.container_id || undefined,
-      createdAt: row.created_at,
-      archivedAt: row.archived_at || undefined,
-      weekStartDate: row.week_start_date || undefined,
-    }));
+    const goals = result.map(goalRowToGoal);
 
     res.json(goals);
   } catch (error: any) {
@@ -227,19 +301,7 @@ app.get('/api/goals/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Goal not found' });
     }
 
-    const row = result[0];
-    const goal: Goal = {
-      id: row.id,
-      discipline: row.discipline,
-      type: row.type,
-      content: row.content,
-      containerId: row.container_id || undefined,
-      createdAt: row.created_at,
-      archivedAt: row.archived_at || undefined,
-      weekStartDate: row.week_start_date || undefined,
-    };
-
-    res.json(goal);
+    res.json(goalRowToGoal(result[0]));
   } catch (error: any) {
     console.error('Error fetching goal:', error);
     res.status(500).json({ error: error.message });
@@ -249,11 +311,12 @@ app.get('/api/goals/:id', async (req: Request, res: Response) => {
 // Create goal
 app.post('/api/goals', async (req: Request, res: Response) => {
   try {
-    const goalData: Omit<Goal, 'createdAt'> = req.body;
+    const goalData: Omit<Goal, 'createdAt' | 'updatedAt'> = req.body;
     const createdAt = Date.now();
+    const updatedAt = createdAt;
 
     await sql`
-      INSERT INTO goals (id, discipline, type, content, container_id, created_at, archived_at, week_start_date)
+      INSERT INTO goals (id, discipline, type, content, container_id, created_at, updated_at, archived_at, week_start_date)
       VALUES (
         ${goalData.id},
         ${goalData.discipline},
@@ -261,6 +324,7 @@ app.post('/api/goals', async (req: Request, res: Response) => {
         ${goalData.content},
         ${goalData.containerId || null},
         ${createdAt},
+        ${updatedAt},
         ${goalData.archivedAt || null},
         ${goalData.weekStartDate || null}
       )
@@ -269,6 +333,7 @@ app.post('/api/goals', async (req: Request, res: Response) => {
     const newGoal: Goal = {
       ...goalData,
       createdAt,
+      updatedAt,
     };
 
     res.json(newGoal);
@@ -293,14 +358,17 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
     }
 
     const row = current[0];
+    const updatedAt = Date.now();
+
     const updated: Goal = {
       id: row.id,
       discipline: updates.discipline ?? row.discipline,
       type: updates.type ?? row.type,
       content: updates.content ?? row.content,
       containerId: updates.containerId !== undefined ? updates.containerId : (row.container_id || undefined),
-      createdAt: row.created_at,
-      archivedAt: updates.archivedAt !== undefined ? updates.archivedAt : (row.archived_at || undefined),
+      createdAt: toMillisOrNow(row.created_at),
+      updatedAt,
+      archivedAt: updates.archivedAt !== undefined ? updates.archivedAt : toMillis(row.archived_at),
       weekStartDate: updates.weekStartDate !== undefined ? updates.weekStartDate : (row.week_start_date || undefined),
     };
 
@@ -311,7 +379,8 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
         type = ${updated.type},
         content = ${updated.content},
         container_id = ${updated.containerId || null},
-        archived_at = ${updated.archivedAt || null},
+        updated_at = ${updatedAt},
+        archived_at = ${updated.archivedAt ?? null},
         week_start_date = ${updated.weekStartDate || null}
       WHERE id = ${req.params.id}
     `;
@@ -330,6 +399,307 @@ app.delete('/api/goals/:id', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting goal:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Goal submissions
+app.get('/api/goal-submissions', async (req: Request, res: Response) => {
+  try {
+    const containerId = req.query.containerId as string | undefined;
+    const weekStartDate = req.query.weekStartDate as string | undefined;
+
+    if (!containerId) {
+      return res.status(400).json({ error: 'containerId is required' });
+    }
+
+    let result;
+    if (weekStartDate) {
+      result = await sql`
+        SELECT * FROM goal_submissions
+        WHERE container_id = ${containerId}
+        AND week_start_date = ${weekStartDate}
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+    } else {
+      result = await sql`
+        SELECT * FROM goal_submissions
+        WHERE container_id = ${containerId}
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Goal submission not found' });
+    }
+
+    res.json(submissionRowToSubmission(result[0]));
+  } catch (error: any) {
+    console.error('Error fetching goal submission:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/goal-submissions/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await sql`
+      SELECT * FROM goal_submissions WHERE id = ${req.params.id}
+    `;
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Goal submission not found' });
+    }
+
+    res.json(submissionRowToSubmission(result[0]));
+  } catch (error: any) {
+    console.error('Error fetching goal submission:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/goal-submissions', async (req: Request, res: Response) => {
+  try {
+    const submissionData: GoalSubmission = req.body;
+    const now = Date.now();
+    const submission: GoalSubmission = {
+      ...submissionData,
+      notes: submissionData.notes ?? '',
+      submittedAt: submissionData.submittedAt ?? now,
+      updatedAt: submissionData.updatedAt ?? now,
+    };
+
+    await sql`
+      INSERT INTO goal_submissions (
+        id,
+        container_id,
+        primary_goal_id,
+        discipline,
+        week_start_date,
+        notes,
+        submitted_at,
+        updated_at
+      )
+      VALUES (
+        ${submission.id},
+        ${submission.containerId},
+        ${submission.primaryGoalId},
+        ${submission.discipline},
+        ${submission.weekStartDate || null},
+        ${submission.notes},
+        ${submission.submittedAt},
+        ${submission.updatedAt}
+      )
+    `;
+
+    res.json(submission);
+  } catch (error: any) {
+    console.error('Error creating goal submission:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/goal-submissions/:id', async (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+    const current = await sql`
+      SELECT * FROM goal_submissions WHERE id = ${req.params.id}
+    `;
+
+    if (current.length === 0) {
+      return res.status(404).json({ error: 'Goal submission not found' });
+    }
+
+    const row = current[0];
+    const updated: GoalSubmission = {
+      id: row.id,
+      containerId: updates.containerId ?? row.container_id,
+      primaryGoalId: updates.primaryGoalId ?? row.primary_goal_id,
+      discipline: updates.discipline ?? row.discipline,
+      weekStartDate: updates.weekStartDate ?? row.week_start_date ?? undefined,
+      notes: updates.notes ?? row.notes ?? '',
+      submittedAt: toMillisOrNow(row.submitted_at),
+      updatedAt: Date.now(),
+    };
+
+    await sql`
+      UPDATE goal_submissions
+      SET
+        container_id = ${updated.containerId},
+        primary_goal_id = ${updated.primaryGoalId},
+        discipline = ${updated.discipline},
+        week_start_date = ${updated.weekStartDate || null},
+        notes = ${updated.notes},
+        submitted_at = ${updated.submittedAt},
+        updated_at = ${updated.updatedAt}
+      WHERE id = ${req.params.id}
+    `;
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Error updating goal submission:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Goal feedback routes
+app.get('/api/goal-feedback', async (req: Request, res: Response) => {
+  try {
+    const { containerId, goalId, weekStartDate, discipline, completed } = req.query as Record<string, string | undefined>;
+    const result = await sql`
+      SELECT * FROM goal_feedback
+      ORDER BY created_at DESC
+    `;
+
+    const completedFilter = typeof completed === 'string'
+      ? completed.toLowerCase() === 'true'
+      : undefined;
+
+    const filtered = result
+      .map(feedbackRowToGoalFeedback)
+      .filter(entry => {
+        if (containerId && entry.containerId !== containerId) return false;
+        if (goalId && entry.goalId !== goalId) return false;
+        if (weekStartDate && entry.weekStartDate !== weekStartDate) return false;
+        if (discipline && entry.discipline !== discipline) return false;
+        if (completedFilter !== undefined && entry.completed !== completedFilter) return false;
+        return true;
+      });
+
+    res.json(filtered);
+  } catch (error: any) {
+    console.error('Error fetching goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/goal-feedback/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await sql`
+      SELECT * FROM goal_feedback WHERE id = ${req.params.id}
+    `;
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Goal feedback not found' });
+    }
+
+    res.json(feedbackRowToGoalFeedback(result[0]));
+  } catch (error: any) {
+    console.error('Error fetching goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/goal-feedback', async (req: Request, res: Response) => {
+  try {
+    const payload: GoalFeedback = req.body;
+    if (!payload.goalId || !payload.containerId || !payload.discipline) {
+      return res.status(400).json({ error: 'goalId, containerId, and discipline are required' });
+    }
+
+    const rating = validateRating(payload.rating);
+    const normalizedWeek = normalizeWeekString(payload.weekStartDate);
+    try {
+      ensureWeekNotFuture(normalizedWeek);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+    const now = Date.now();
+    const feedback: GoalFeedback = {
+      ...payload,
+      rating,
+      feedback: payload.feedback ?? undefined,
+      completed: payload.completed ?? false,
+      createdAt: payload.createdAt ?? now,
+      updatedAt: payload.updatedAt ?? now,
+      weekStartDate: normalizedWeek,
+    };
+
+    await sql`
+      INSERT INTO goal_feedback (
+        id,
+        goal_id,
+        container_id,
+        discipline,
+        week_start_date,
+        rating,
+        feedback,
+        completed,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${feedback.id},
+        ${feedback.goalId},
+        ${feedback.containerId},
+        ${feedback.discipline},
+        ${feedback.weekStartDate || null},
+        ${feedback.rating ?? null},
+        ${feedback.feedback || null},
+        ${feedback.completed},
+        ${feedback.createdAt},
+        ${feedback.updatedAt}
+      )
+    `;
+
+    res.json(feedback);
+  } catch (error: any) {
+    console.error('Error creating goal feedback:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/goal-feedback/:id', async (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+    const current = await sql`
+      SELECT * FROM goal_feedback WHERE id = ${req.params.id}
+    `;
+
+    if (current.length === 0) {
+      return res.status(404).json({ error: 'Goal feedback not found' });
+    }
+
+    const row = current[0];
+    const rating = validateRating(updates.rating ?? row.rating);
+    const normalizedWeek = normalizeWeekString(updates.weekStartDate ?? row.week_start_date);
+    try {
+      ensureWeekNotFuture(normalizedWeek);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const updated: GoalFeedback = {
+      id: row.id,
+      goalId: updates.goalId ?? row.goal_id,
+      containerId: updates.containerId ?? row.container_id,
+      discipline: updates.discipline ?? row.discipline,
+      weekStartDate: normalizedWeek,
+      rating,
+      feedback: updates.feedback ?? row.feedback ?? undefined,
+      completed: updates.completed ?? (row.completed ?? false),
+      createdAt: toMillisOrNow(row.created_at),
+      updatedAt: Date.now(),
+    };
+
+    await sql`
+      UPDATE goal_feedback
+      SET
+        goal_id = ${updated.goalId},
+        container_id = ${updated.containerId},
+        discipline = ${updated.discipline},
+        week_start_date = ${updated.weekStartDate || null},
+        rating = ${updated.rating ?? null},
+        feedback = ${updated.feedback || null},
+        completed = ${updated.completed},
+        updated_at = ${updated.updatedAt}
+      WHERE id = ${req.params.id}
+    `;
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Error updating goal feedback:', error);
     res.status(500).json({ error: error.message });
   }
 });

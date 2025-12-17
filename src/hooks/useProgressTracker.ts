@@ -20,9 +20,12 @@ export function useProgressTracker() {
   useEffect(() => {
     async function load() {
       try {
+        logger.info('[useProgressTracker] Loading initial data');
         const data = await getAppData();
         setAppData(data);
+        logger.info(`[useProgressTracker] Loaded app data: startDate=${data.startDate}, cycleLength=${data.cycleLength}`);
         const allGoals = await getActiveGoals();
+        logger.info(`[useProgressTracker] Loaded ${allGoals.length} active goals`);
         setGoals(allGoals);
       } catch (error) {
         logger.error('Failed to load progress tracker data:', error);
@@ -80,6 +83,7 @@ export function useProgressTracker() {
     async function loadContainers() {
       if (!appData) return;
 
+      logger.info('[useProgressTracker] Loading containers for all disciplines');
       // Load containers for current week AND future weeks (no weekStartDate filter for future)
       // Get all active containers regardless of week
       const containers = {
@@ -87,6 +91,7 @@ export function useProgressTracker() {
         Jumps: await getGoalContainersByDiscipline('Jumps'),
         Edges: await getGoalContainersByDiscipline('Edges'),
       };
+      logger.info(`[useProgressTracker] Loaded containers: Spins=${containers.Spins.length}, Jumps=${containers.Jumps.length}, Edges=${containers.Edges.length}`);
       setContainersByDiscipline(containers);
     }
     loadContainers();
@@ -97,12 +102,14 @@ export function useProgressTracker() {
     async function refreshContainers() {
       if (!appData) return;
 
+      logger.info(`[useProgressTracker] Refreshing containers (goals changed: ${goals.length} goals)`);
       // Load all active containers (current + future weeks)
       const containers = {
         Spins: await getGoalContainersByDiscipline('Spins'),
         Jumps: await getGoalContainersByDiscipline('Jumps'),
         Edges: await getGoalContainersByDiscipline('Edges'),
       };
+      logger.info(`[useProgressTracker] Refreshed containers: Spins=${containers.Spins.length}, Jumps=${containers.Jumps.length}, Edges=${containers.Edges.length}`);
       setContainersByDiscipline(containers);
     }
     refreshContainers();
