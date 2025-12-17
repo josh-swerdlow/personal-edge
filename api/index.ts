@@ -43,7 +43,7 @@ const feedbackRowToGoalFeedback = (row: any): GoalFeedback => ({
   goalId: row.goal_id,
   containerId: row.container_id,
   discipline: row.discipline,
-  weekStartDate: row.week_start_date || undefined,
+  weekStartDate: normalizeWeekString(row.week_start_date),
   rating: row.rating === null || row.rating === undefined ? undefined : Number(row.rating),
   feedback: row.feedback || undefined,
   completed: row.completed ?? false,
@@ -413,6 +413,7 @@ app.get('/api/goal-feedback', async (req: Request, res: Response) => {
   }
   try {
     const { containerId, goalId, weekStartDate, discipline, completed } = req.query as Record<string, string | undefined>;
+    const normalizedWeekStart = normalizeWeekString(weekStartDate);
     const result = await sql`
       SELECT * FROM goal_feedback
       ORDER BY created_at DESC
@@ -427,7 +428,7 @@ app.get('/api/goal-feedback', async (req: Request, res: Response) => {
       .filter(entry => {
         if (containerId && entry.containerId !== containerId) return false;
         if (goalId && entry.goalId !== goalId) return false;
-        if (weekStartDate && entry.weekStartDate !== weekStartDate) return false;
+        if (normalizedWeekStart && entry.weekStartDate !== normalizedWeekStart) return false;
         if (discipline && entry.discipline !== discipline) return false;
         if (completedFilter !== undefined && entry.completed !== completedFilter) return false;
         return true;
