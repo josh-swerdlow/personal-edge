@@ -71,6 +71,27 @@ export class ProgressTrackerDB extends Dexie {
         console.warn('[ProgressTrackerDB] Goal feedback migration skipped:', error);
       }
     });
+
+    // Version 6: Add track field index for on-ice/off-ice filtering
+    this.version(6).stores({
+      goals: "id, discipline, type, createdAt, archivedAt, weekStartDate, containerId, track",
+      appData: "id, startDate",
+      goalSubmissions: "id, containerId, primaryGoalId, weekStartDate",
+      goalFeedback: "id, goalId, containerId, weekStartDate, discipline, createdAt",
+    }).upgrade(async (tx) => {
+      // Set track to 'on-ice' for any existing goals without a track field
+      console.log('[ProgressTrackerDB] Migrating goals to include track field...');
+      const goalsTable = tx.table('goals');
+      const allGoals = await goalsTable.toArray();
+      let migrated = 0;
+      for (const goal of allGoals) {
+        if (!goal.track) {
+          await goalsTable.update(goal.id, { track: 'on-ice' });
+          migrated++;
+        }
+      }
+      console.log(`[ProgressTrackerDB] Migrated ${migrated} goals to have track='on-ice'`);
+    });
   }
 }
 

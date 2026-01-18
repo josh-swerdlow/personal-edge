@@ -458,6 +458,10 @@ export async function archiveWeek(
 // Goal Container Operations
 // Helper: Build a GoalContainer from goals
 function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContainer {
+  const track = primaryGoal.track || 'on-ice';
+  if (!primaryGoal.track) {
+    logger.info(`[buildGoalContainer] Goal "${primaryGoal.content?.substring(0, 30)}..." has no track field, defaulting to on-ice`);
+  }
   return {
     id: primaryGoal.id,
     discipline: primaryGoal.discipline,
@@ -466,7 +470,7 @@ function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContai
     createdAt: primaryGoal.createdAt,
     archivedAt: primaryGoal.archivedAt,
     weekStartDate: primaryGoal.weekStartDate,
-    track: primaryGoal.track || 'on-ice', // Default to on-ice for backward compatibility
+    track, // Default to on-ice for backward compatibility
   };
 }
 
@@ -578,6 +582,8 @@ export async function createGoalContainer(
   weekStartDate?: string,
   track: "on-ice" | "off-ice" = "on-ice"
 ): Promise<GoalContainer> {
+  logger.info(`[createGoalContainer] Creating container: discipline=${discipline}, track=${track}, weekStartDate=${weekStartDate}`);
+
   // Validate: Max 3 containers per discipline per track
   const existingContainers = await getGoalContainersByDiscipline(discipline, undefined, track);
   if (existingContainers.length >= 3) {
@@ -606,14 +612,17 @@ export async function createGoalContainer(
   const savedPrimaryGoal = await writeGoalToNeonAndSync(
     async () => {
       if (isNeonAvailable()) {
+        logger.info(`[createGoalContainer] Writing primary goal to Neon with track=${primaryGoal.track}`);
         return await createGoalInNeon(primaryGoal);
       } else {
+        logger.info(`[createGoalContainer] Writing primary goal to IndexedDB with track=${primaryGoal.track}`);
         await progressTrackerDB.goals.add(primaryGoal);
         return primaryGoal;
       }
     },
     primaryGoal.id
   );
+  logger.info(`[createGoalContainer] Saved primary goal has track=${savedPrimaryGoal.track}`);
 
   // Create working goals
   const workingGoals: Goal[] = [];
@@ -646,7 +655,9 @@ export async function createGoalContainer(
     }
   }
 
-  return buildGoalContainer(savedPrimaryGoal, workingGoals);
+  const container = buildGoalContainer(savedPrimaryGoal, workingGoals);
+  logger.info(`[createGoalContainer] Returning container with track=${container.track}`);
+  return container;
 }
 
 // Add a working goal to an existing container

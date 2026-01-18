@@ -309,9 +309,10 @@ export async function syncGoalFromNeon(goalId: string): Promise<Goal | null> {
     const goal = await getGoalFromNeon(goalId);
 
     if (goal) {
+      logger.info(`[Sync] Got goal from Neon: id=${goal.id}, track=${goal.track}, content="${goal.content?.substring(0, 20)}..."`);
       // Upsert the goal in IndexedDB
       await progressTrackerDB.goals.put(goal);
-      logger.verbose(`[Sync] Synced goal ${goalId} to IndexedDB`);
+      logger.info(`[Sync] Synced goal ${goalId} to IndexedDB with track=${goal.track}`);
     }
 
     return goal;

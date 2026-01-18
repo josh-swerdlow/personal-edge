@@ -66,6 +66,7 @@ const goalRowToGoal = (row: any): Goal => ({
   updatedAt: toMillis(row.updated_at) ?? Date.now(),
   archivedAt: toMillis(row.archived_at),
   weekStartDate: row.week_start_date || undefined,
+  track: row.track || 'on-ice',
 });
 
 const submissionRowToSubmission = (row: any): GoalSubmission => ({
@@ -314,9 +315,10 @@ app.post('/api/goals', async (req: Request, res: Response) => {
     const goalData: Omit<Goal, 'createdAt' | 'updatedAt'> = req.body;
     const createdAt = Date.now();
     const updatedAt = createdAt;
+    const track = goalData.track || 'on-ice';
 
     await sql`
-      INSERT INTO goals (id, discipline, type, content, container_id, created_at, updated_at, archived_at, week_start_date)
+      INSERT INTO goals (id, discipline, type, content, container_id, created_at, updated_at, archived_at, week_start_date, track)
       VALUES (
         ${goalData.id},
         ${goalData.discipline},
@@ -326,7 +328,8 @@ app.post('/api/goals', async (req: Request, res: Response) => {
         ${createdAt},
         ${updatedAt},
         ${goalData.archivedAt || null},
-        ${goalData.weekStartDate || null}
+        ${goalData.weekStartDate || null},
+        ${track}
       )
     `;
 
@@ -334,6 +337,7 @@ app.post('/api/goals', async (req: Request, res: Response) => {
       ...goalData,
       createdAt,
       updatedAt,
+      track,
     };
 
     res.json(newGoal);
@@ -370,6 +374,7 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
       updatedAt,
       archivedAt: updates.archivedAt !== undefined ? updates.archivedAt : toMillis(row.archived_at),
       weekStartDate: updates.weekStartDate !== undefined ? updates.weekStartDate : (row.week_start_date || undefined),
+      track: updates.track !== undefined ? updates.track : (row.track || 'on-ice'),
     };
 
     await sql`
@@ -381,7 +386,8 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
         container_id = ${updated.containerId || null},
         updated_at = ${updatedAt},
         archived_at = ${updated.archivedAt ?? null},
-        week_start_date = ${updated.weekStartDate || null}
+        week_start_date = ${updated.weekStartDate || null},
+        track = ${updated.track}
       WHERE id = ${req.params.id}
     `;
 

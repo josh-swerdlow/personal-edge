@@ -267,6 +267,7 @@ app.get('/api/goals', async (_req: Request, res: Response) => {
       createdAt: row.created_at,
       archivedAt: row.archived_at || undefined,
       weekStartDate: row.week_start_date || undefined,
+      track: row.track || 'on-ice',
     }));
 
     res.json(goals);
@@ -291,6 +292,8 @@ app.get('/api/goals/:id', async (req: Request, res: Response) => {
     }
 
     const row = result[0];
+    console.log(`[API] GET /api/goals/${req.params.id} - row.track from DB: ${row.track}`);
+
     const goal: Goal = {
       id: row.id,
       discipline: row.discipline,
@@ -300,8 +303,10 @@ app.get('/api/goals/:id', async (req: Request, res: Response) => {
       createdAt: row.created_at,
       archivedAt: row.archived_at || undefined,
       weekStartDate: row.week_start_date || undefined,
+      track: row.track || 'on-ice',
     };
 
+    console.log(`[API] GET /api/goals/${req.params.id} - returning track: ${goal.track}`);
     res.json(goal);
   } catch (error: any) {
     console.error('Error fetching goal:', error);
@@ -317,9 +322,13 @@ app.post('/api/goals', async (req: Request, res: Response) => {
   try {
     const goalData: Omit<Goal, 'createdAt'> = req.body;
     const createdAt = Date.now();
+    const track = goalData.track || 'on-ice';
+
+    console.log(`[API] POST /api/goals - received track: ${goalData.track}, using track: ${track}`);
+    console.log(`[API] POST /api/goals - full body:`, JSON.stringify(req.body, null, 2));
 
     await sql`
-      INSERT INTO goals (id, discipline, type, content, container_id, created_at, archived_at, week_start_date)
+      INSERT INTO goals (id, discipline, type, content, container_id, created_at, archived_at, week_start_date, track)
       VALUES (
         ${goalData.id},
         ${goalData.discipline},
@@ -328,15 +337,18 @@ app.post('/api/goals', async (req: Request, res: Response) => {
         ${goalData.containerId || null},
         ${createdAt},
         ${goalData.archivedAt || null},
-        ${goalData.weekStartDate || null}
+        ${goalData.weekStartDate || null},
+        ${track}
       )
     `;
 
     const newGoal: Goal = {
       ...goalData,
       createdAt,
+      track,
     };
 
+    console.log(`[API] POST /api/goals - returning goal with track: ${newGoal.track}`);
     res.json(newGoal);
   } catch (error: any) {
     console.error('Error creating goal:', error);
@@ -371,6 +383,7 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
       createdAt: row.created_at,
       archivedAt: updates.archivedAt !== undefined ? updates.archivedAt : (row.archived_at || undefined),
       weekStartDate: updates.weekStartDate !== undefined ? updates.weekStartDate : (row.week_start_date || undefined),
+      track: updates.track !== undefined ? updates.track : (row.track || 'on-ice'),
     };
 
     await sql`
@@ -381,7 +394,8 @@ app.put('/api/goals/:id', async (req: Request, res: Response) => {
         content = ${updated.content},
         container_id = ${updated.containerId || null},
         archived_at = ${updated.archivedAt || null},
-        week_start_date = ${updated.weekStartDate || null}
+        week_start_date = ${updated.weekStartDate || null},
+        track = ${updated.track}
       WHERE id = ${req.params.id}
     `;
 

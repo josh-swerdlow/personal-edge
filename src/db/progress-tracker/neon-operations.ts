@@ -57,10 +57,13 @@ export async function getGoalFromNeon(id: string): Promise<Goal | null> {
 }
 
 export async function createGoalInNeon(goal: Omit<Goal, 'createdAt' | 'updatedAt'>): Promise<Goal> {
-  return await apiRequest<Goal>('/api/goals', {
+  console.log('[createGoalInNeon] Sending goal to API:', JSON.stringify(goal, null, 2));
+  const result = await apiRequest<Goal>('/api/goals', {
     method: 'POST',
     body: JSON.stringify(goal),
   });
+  console.log('[createGoalInNeon] API returned:', JSON.stringify(result, null, 2));
+  return result;
 }
 
 export async function updateGoalInNeon(
