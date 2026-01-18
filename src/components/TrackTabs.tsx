@@ -7,10 +7,10 @@ interface TrackTabsProps {
 
 export function TrackTabs({ activeTrack, onTrackChange }: TrackTabsProps) {
   return (
-    <div className="flex gap-1.5">
+    <div className="flex items-center gap-1.5">
       <button
         type="button"
-        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+        className={`h-6 min-h-0 min-w-0 px-2 py-0 rounded text-xs font-medium transition-colors flex items-center whitespace-nowrap leading-none ${
           activeTrack === 'on-ice'
             ? 'bg-blue-600 text-white'
             : 'bg-white/20 text-white hover:bg-white/30'
@@ -21,7 +21,7 @@ export function TrackTabs({ activeTrack, onTrackChange }: TrackTabsProps) {
       </button>
       <button
         type="button"
-        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+        className={`h-6 min-h-0 min-w-0 px-2 py-0 rounded text-xs font-medium transition-colors flex items-center whitespace-nowrap leading-none ${
           activeTrack === 'off-ice'
             ? 'bg-blue-600 text-white'
             : 'bg-white/20 text-white hover:bg-white/30'

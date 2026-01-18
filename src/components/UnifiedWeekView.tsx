@@ -519,13 +519,13 @@ function WeekCard({
             {formatWeekDate(week.weekStartDate)}
           </span>
           {isCurrent && (
-            <span className="text-xs px-2 py-1 bg-blue-500/30 text-blue-200 rounded">Current</span>
+            <span className="h-6 text-xs px-2 bg-blue-500/30 text-blue-200 rounded flex items-center">Current</span>
           )}
           {isPast && (
-            <span className="text-xs px-2 py-1 bg-gray-500/30 text-gray-200 rounded">Past (view only)</span>
+            <span className="h-6 text-xs px-2 bg-gray-500/30 text-gray-200 rounded flex items-center">Past</span>
           )}
           {isFuture && !isCurrent && (
-            <span className="text-xs px-2 py-1 bg-white/20 text-white rounded">Future</span>
+            <span className="h-6 text-xs px-2 bg-white/20 text-white rounded flex items-center">Future</span>
           )}
         </div>
         <TrackTabs activeTrack={activeTrack} onTrackChange={setActiveTrack} />
