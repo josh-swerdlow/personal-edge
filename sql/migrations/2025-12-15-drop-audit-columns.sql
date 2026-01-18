@@ -14,3 +14,4 @@ DROP TRIGGER IF EXISTS update_decks_updated_at ON decks;
 -- Shared trigger function cleanup (only if nothing else uses it)
 DROP FUNCTION IF EXISTS update_updated_at_column;
 
+

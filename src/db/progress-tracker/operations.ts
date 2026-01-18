@@ -285,6 +285,7 @@ export async function initializeAppData(startDate: string, cycleLength: number =
 export async function createGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<Goal> {
   const newGoal: Goal = {
     id: generateUUID(),
+    track: 'on-ice', // Default to on-ice for backward compatibility
     ...goal,
     createdAt: Date.now(),
   };
@@ -464,13 +465,15 @@ function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContai
     workingGoalIds: workingGoals.map(g => g.id),
     createdAt: primaryGoal.createdAt,
     weekStartDate: primaryGoal.weekStartDate,
+    track: primaryGoal.track || 'on-ice', // Default to on-ice for backward compatibility
   };
 }
 
 // Get all goal containers for a discipline
 export async function getGoalContainersByDiscipline(
   discipline: "Spins" | "Jumps" | "Edges",
-  weekStartDate?: string
+  weekStartDate?: string,
+  track?: "on-ice" | "off-ice"
 ): Promise<GoalContainer[]> {
   logger.info(`[getGoalContainersByDiscipline] Loading containers for ${discipline}${weekStartDate ? ` (week: ${weekStartDate})` : ' (all weeks)'}`);
 
@@ -487,6 +490,13 @@ export async function getGoalContainersByDiscipline(
   let primaryGoals = allGoals.filter(g =>
     g.type === 'primary' && !g.archivedAt
   );
+
+  // Filter by track if provided (treat undefined track as "on-ice" for backward compatibility)
+  if (track !== undefined) {
+    const beforeTrackFilter = primaryGoals.length;
+    primaryGoals = primaryGoals.filter(g => (g.track || 'on-ice') === track);
+    logger.info(`[getGoalContainersByDiscipline] Filtered to ${primaryGoals.length} primary goals for track ${track} (from ${beforeTrackFilter})`);
+  }
 
   logger.info(`[getGoalContainersByDiscipline] Found ${primaryGoals.length} active primary goals for ${discipline}`);
 
@@ -563,12 +573,13 @@ export async function createGoalContainer(
   discipline: "Spins" | "Jumps" | "Edges",
   primaryGoalContent: string,
   workingGoalContents: string[] = [],
-  weekStartDate?: string
+  weekStartDate?: string,
+  track: "on-ice" | "off-ice" = "on-ice"
 ): Promise<GoalContainer> {
-  // Validate: Max 3 containers per discipline
-  const existingContainers = await getGoalContainersByDiscipline(discipline);
+  // Validate: Max 3 containers per discipline per track
+  const existingContainers = await getGoalContainersByDiscipline(discipline, undefined, track);
   if (existingContainers.length >= 3) {
-    throw new Error(`Maximum 3 goal containers per discipline. ${discipline} already has ${existingContainers.length} containers.`);
+    throw new Error(`Maximum 3 goal containers per discipline per track. ${discipline} (${track}) already has ${existingContainers.length} containers.`);
   }
 
   // Validate: Max 2 working goals
@@ -586,6 +597,7 @@ export async function createGoalContainer(
     containerId: primaryGoalId, // Primary goal's containerId is its own id
     createdAt: Date.now(),
     weekStartDate,
+    track,
   };
 
   await progressTrackerDB.goals.add(primaryGoal);
@@ -602,6 +614,7 @@ export async function createGoalContainer(
         containerId: primaryGoalId, // Working goals reference the primary goal's id
         createdAt: Date.now(),
         weekStartDate,
+        track,
       };
       await progressTrackerDB.goals.add(workingGoal);
       workingGoals.push(workingGoal);
@@ -642,6 +655,7 @@ export async function addWorkingGoalToContainer(
     containerId: containerId,
     createdAt: Date.now(),
     weekStartDate: primaryGoal.weekStartDate,
+    track: primaryGoal.track || 'on-ice', // Inherit track from primary goal
   };
 
   await progressTrackerDB.transaction('rw', progressTrackerDB.goals, async () => {
@@ -681,8 +695,8 @@ export async function deleteGoalContainer(containerId: string): Promise<void> {
 }
 
 // Validation functions
-export async function canCreateContainer(discipline: "Spins" | "Jumps" | "Edges"): Promise<boolean> {
-  const containers = await getGoalContainersByDiscipline(discipline);
+export async function canCreateContainer(discipline: "Spins" | "Jumps" | "Edges", track: "on-ice" | "off-ice" = "on-ice"): Promise<boolean> {
+  const containers = await getGoalContainersByDiscipline(discipline, undefined, track);
   return containers.length < 3;
 }
 

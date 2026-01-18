@@ -6,8 +6,9 @@ import { getPrioritizedCards, CardWithContext } from '../db/training-coach/searc
 import { DISCIPLINES, getDisciplineDisplay } from '../utils/disciplines';
 import { updateCard } from '../db/training-coach/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
-import { Goal } from '../db/progress-tracker/types';
+import { Goal, GoalTrack } from '../db/progress-tracker/types';
 import { logger } from '../utils/logger';
+import { TrackTabs } from '../components/TrackTabs';
 
 export default function Home() {
 
@@ -23,6 +24,7 @@ export default function Home() {
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const [activeTrack, setActiveTrack] = useState<GoalTrack>('on-ice');
 
   const loadPriorityCards = async () => {
     setLoadingCards(true);
@@ -95,17 +97,32 @@ export default function Home() {
     return [currentFocus, ...others] as Array<typeof DISCIPLINES[number]>;
   }, [currentFocus]);
 
-  // Check if there are any containers
+  // Filter containers by active track
+  const filteredContainersByDiscipline = useMemo(() => {
+    const filtered: typeof containersByDiscipline = {
+      Spins: [],
+      Jumps: [],
+      Edges: [],
+    };
+    for (const discipline of DISCIPLINES) {
+      filtered[discipline] = containersByDiscipline[discipline].filter(
+        container => (container.track || 'on-ice') === activeTrack
+      );
+    }
+    return filtered;
+  }, [containersByDiscipline, activeTrack]);
+
+  // Check if there are any containers for the active track
   const hasAnyGoals = useMemo(() => {
     const counts = orderedDisciplines.map(d => ({
       discipline: d,
-      count: containersByDiscipline[d].length
+      count: filteredContainersByDiscipline[d].length
     }));
-    logger.info(`[Home] Container counts:`, counts);
+    logger.info(`[Home] Container counts for ${activeTrack}:`, counts);
     return orderedDisciplines.some(discipline =>
-      containersByDiscipline[discipline].length > 0
+      filteredContainersByDiscipline[discipline].length > 0
     );
-  }, [orderedDisciplines, containersByDiscipline]);
+  }, [orderedDisciplines, filteredContainersByDiscipline, activeTrack]);
 
   const handleUnmarkPriority = async (card: CardWithContext) => {
     try {
@@ -178,22 +195,33 @@ export default function Home() {
         <section className="mb-8">
           {!hasAnyGoals ? (
             <div className="liquid-glass liquid-glass--card">
-              <div className="liquid-glass__content p-8 text-center">
-                <p className="text-white">No goals set for this week yet.</p>
-                <Link to="/progress" className="text-white hover:text-white/80 mt-2 inline-block underline">
-                  Go to Progress Tracker →
-                </Link>
+              <div className="liquid-glass__content">
+                {/* Navbar with title and tabs */}
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-white">Goals</h2>
+                  <TrackTabs activeTrack={activeTrack} onTrackChange={setActiveTrack} />
+                </div>
+                <div className="p-8 text-center">
+                  <p className="text-white">No goals set for this week yet.</p>
+                  <Link to="/progress" className="text-white hover:text-white/80 mt-2 inline-block underline">
+                    Go to Progress Tracker →
+                  </Link>
+                </div>
               </div>
             </div>
           ) : (
               <div className="liquid-glass liquid-glass--card">
-                <div className="liquid-glass__content">
-                  <h2 className="text-xl font-semibold text-white mb-4">Goals</h2>
+                <div className="liquid-glass__content transition-all duration-200 ease-in-out">
+                  {/* Navbar with title and tabs */}
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-white">Goals</h2>
+                    <TrackTabs activeTrack={activeTrack} onTrackChange={setActiveTrack} />
+                  </div>
 
                   {/* Desktop: Three Column Layout */}
-                  <div className="hidden md:grid md:grid-cols-3 md:gap-4">
+                  <div className="hidden md:grid md:grid-cols-3 md:gap-4 min-h-[200px]">
                     {orderedDisciplines.map((discipline, index) => {
-                      const containers = containersByDiscipline[discipline];
+                      const containers = filteredContainersByDiscipline[discipline];
 
                       return (
                         <div
@@ -213,7 +241,9 @@ export default function Home() {
                               })}
                             </div>
                           ) : (
-                            <p className="text-white/50 text-sm">No goals set</p>
+                            <div className="min-h-[60px] flex items-center">
+                              <p className="text-white/50 text-sm">No goals set</p>
+                            </div>
                           )}
                         </div>
                       );
@@ -248,7 +278,7 @@ export default function Home() {
                         style={{ transform: `translateX(-${carouselIndex * 100}%)` }}
                       >
                         {orderedDisciplines.map(discipline => {
-                          const containers = containersByDiscipline[discipline];
+                          const containers = filteredContainersByDiscipline[discipline];
 
                           return (
                             <div
@@ -268,7 +298,9 @@ export default function Home() {
                                   })}
                                 </div>
                               ) : (
-                                <p className="text-white/50 text-sm">No goals set</p>
+                                <div className="min-h-[60px] flex items-center">
+                                  <p className="text-white/50 text-sm">No goals set</p>
+                                </div>
                               )}
                             </div>
                           );

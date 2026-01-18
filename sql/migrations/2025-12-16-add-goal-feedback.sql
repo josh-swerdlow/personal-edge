@@ -18,3 +18,4 @@ CREATE INDEX IF NOT EXISTS idx_goal_feedback_completed_week ON goal_feedback(dis
 CREATE INDEX IF NOT EXISTS idx_goal_feedback_created_at ON goal_feedback(created_at);
 
 
+

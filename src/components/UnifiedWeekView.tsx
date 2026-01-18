@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
-import { Goal, GoalContainer, GoalFeedback } from '../db/progress-tracker/types';
+import { Goal, GoalContainer, GoalFeedback, GoalTrack } from '../db/progress-tracker/types';
+import { TrackTabs } from './TrackTabs';
 import {
   getAppData,
   getWeekStartDate,
@@ -49,6 +50,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
   const [appData, setAppData] = useState<{ startDate: string; cycleLength: number } | null>(null);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [archiveDiscipline, setArchiveDiscipline] = useState<"Spins" | "Jumps" | "Edges" | null>(null);
+  const [archiveTrack, setArchiveTrack] = useState<"on-ice" | "off-ice">("on-ice");
 
   const disciplines = DISCIPLINES;
 
@@ -66,7 +68,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
       const cyclePosition = weekNumber % data.cycleLength;
       const discipline = disciplines[cyclePosition];
 
-      // Load goal containers for current week
+      // Load goal containers for current week (will be filtered by track in WeekCard)
       const containers = await getGoalContainersByDiscipline(discipline, currentWeekStart);
 
       setCurrentWeek({
@@ -109,7 +111,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         const cyclePosition = futureWeekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
-        // Load goal containers for this week
+        // Load goal containers for this week (will be filtered by track in WeekCard)
         const containers = await getGoalContainersByDiscipline(discipline, weekStartStr);
 
         future.push({
@@ -152,7 +154,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         const cyclePosition = pastWeekNumber % appData.cycleLength;
         const discipline = disciplines[cyclePosition];
 
-        // Load goal containers for this week
+        // Load goal containers for this week (will be filtered by track in WeekCard)
         const containers = await getGoalContainersByDiscipline(discipline, weekStartStr);
 
         past.push({
@@ -231,17 +233,18 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     }
   }
 
-  function handleSubmitRequest(discipline: "Spins" | "Jumps" | "Edges") {
+  function handleSubmitRequest(discipline: "Spins" | "Jumps" | "Edges", track: "on-ice" | "off-ice" = "on-ice") {
     setArchiveDiscipline(discipline);
+    setArchiveTrack(track);
     setShowArchiveModal(true);
   }
 
-  async function handleCreateContainer(discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) {
+  async function handleCreateContainer(discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string, track: "on-ice" | "off-ice" = "on-ice") {
     if (!primaryContent || !primaryContent.trim()) return;
 
     try {
       // Explicitly pass empty array to ensure no working goals are created
-      await createGoalContainer(discipline, primaryContent.trim(), [], weekStartDate);
+      await createGoalContainer(discipline, primaryContent.trim(), [], weekStartDate, track);
       // Clear any editing state before reloading
       setEditingGoal(null);
       setEditText('');
@@ -292,6 +295,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
       {showArchiveModal && archiveDiscipline && (
         <ArchiveWeekModal
           focusDiscipline={archiveDiscipline}
+          track={archiveTrack}
           onClose={() => setShowArchiveModal(false)}
           onSuccess={async () => {
             await loadCurrentWeek();
@@ -448,9 +452,9 @@ interface WeekCardProps {
   setEditText: (text: string) => void;
   onSave: () => void;
   onCancel: () => void;
-  onCreateContainer: (discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string) => void;
+  onCreateContainer: (discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string, track?: "on-ice" | "off-ice") => void;
   onAddWorkingGoal: (containerId: string, content: string) => void;
-  onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges") => void;
+  onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges", track?: "on-ice" | "off-ice") => void;
 }
 
 function WeekCard({
@@ -476,12 +480,20 @@ function WeekCard({
   const [addingWorkingToContainer, setAddingWorkingToContainer] = useState<string | null>(null);
   const [newWorkingText, setNewWorkingText] = useState('');
   const [canCreate, setCanCreate] = useState(true);
+  const [activeTrack, setActiveTrack] = useState<GoalTrack>('on-ice');
   const readOnly = isPast;
+
+  // Filter containers by active track
+  const filteredContainers = useMemo(() => {
+    return week.containers.filter(
+      container => (container.track || 'on-ice') === activeTrack
+    );
+  }, [week.containers, activeTrack]);
 
   // Check if we can create a new container
   useEffect(() => {
-    canCreateContainer(week.discipline).then(setCanCreate);
-  }, [week.discipline, week.containers.length]);
+    canCreateContainer(week.discipline, activeTrack).then(setCanCreate);
+  }, [week.discipline, filteredContainers.length, activeTrack]);
 
   async function handleCreateContainer() {
     if (!newPrimaryText.trim()) {
@@ -489,7 +501,7 @@ function WeekCard({
       setNewPrimaryText('');
       return;
     }
-    await onCreateContainer(week.discipline, newPrimaryText, week.weekStartDate);
+    await onCreateContainer(week.discipline, newPrimaryText, week.weekStartDate, activeTrack);
     setAddingContainer(false);
     setNewPrimaryText('');
   }
@@ -497,27 +509,36 @@ function WeekCard({
 
   return (
     <LiquidGlassCard>
-      <div className="flex items-center gap-3 mb-4">
-        <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getDisciplineBadgeClasses(week.discipline)}`}>
-          {getDisciplineDisplay(week.discipline)} Week
-        </span>
-        <span className="text-sm text-white/70">
-          {formatWeekDate(week.weekStartDate)}
-        </span>
-        {isCurrent && (
-          <span className="text-xs px-2 py-1 bg-blue-500/30 text-blue-200 rounded">Current</span>
-        )}
-        {isPast && (
-          <span className="text-xs px-2 py-1 bg-gray-500/30 text-gray-200 rounded">Past (view only)</span>
-        )}
-        {isFuture && !isCurrent && (
-          <span className="text-xs px-2 py-1 bg-white/20 text-white rounded">Future</span>
-        )}
+      {/* Navbar with week info and tabs */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getDisciplineBadgeClasses(week.discipline)}`}>
+            {getDisciplineDisplay(week.discipline)} Week
+          </span>
+          <span className="text-sm text-white/70">
+            {formatWeekDate(week.weekStartDate)}
+          </span>
+          {isCurrent && (
+            <span className="text-xs px-2 py-1 bg-blue-500/30 text-blue-200 rounded">Current</span>
+          )}
+          {isPast && (
+            <span className="text-xs px-2 py-1 bg-gray-500/30 text-gray-200 rounded">Past (view only)</span>
+          )}
+          {isFuture && !isCurrent && (
+            <span className="text-xs px-2 py-1 bg-white/20 text-white rounded">Future</span>
+          )}
+        </div>
+        <TrackTabs activeTrack={activeTrack} onTrackChange={setActiveTrack} />
       </div>
 
       {/* Goal Containers */}
       <div className="space-y-4">
-        {week.containers.map(container => (
+        {filteredContainers.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-white/70">No {activeTrack === 'on-ice' ? 'on ice' : 'off ice'} goals set for this week yet.</p>
+          </div>
+        ) : (
+          filteredContainers.map(container => (
           <GoalContainerCard
             key={container.id}
             container={container}
@@ -535,10 +556,10 @@ function WeekCard({
             setAddingWorkingToContainer={setAddingWorkingToContainer}
             newWorkingText={newWorkingText}
             setNewWorkingText={setNewWorkingText}
-            onSubmitRequest={onSubmitRequest}
             readOnly={readOnly}
             />
-          ))}
+          ))
+        )}
 
         {/* Add Container Button */}
         {!readOnly && (addingContainer ? (
@@ -562,7 +583,7 @@ function WeekCard({
               onBlur={handleCreateContainer}
             />
           </div>
-        ) : canCreate && week.containers.length < 3 ? (
+        ) : canCreate && filteredContainers.length < 3 ? (
           <button
             onClick={() => setAddingContainer(true)}
             className="w-full py-2 px-4 border border-dashed border-white/30 rounded-lg text-white/70 hover:text-white hover:border-white/50 hover:bg-white/10 transition flex items-center justify-center gap-2"
@@ -570,11 +591,23 @@ function WeekCard({
             <FaPlus size={14} />
             <span>Add Goal Container</span>
           </button>
-        ) : week.containers.length >= 3 ? (
-          <p className="text-sm text-white/50 text-center italic">Maximum 3 goal containers per discipline</p>
+        ) : filteredContainers.length >= 3 ? (
+          <p className="text-sm text-white/50 text-center italic">Maximum 3 goal containers per discipline per track</p>
         ) : null)}
 
       </div>
+
+      {/* Single Submit Button for the entire week */}
+      {!readOnly && !isFuture && isCurrent && week.containers.length > 0 && (
+        <div className="mt-6 border-t border-white/10 pt-4 flex items-center justify-end">
+          <button
+            onClick={() => onSubmitRequest(week.discipline, activeTrack)}
+            className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 transition"
+          >
+            Submit
+          </button>
+        </div>
+      )}
     </LiquidGlassCard>
   );
 }
@@ -595,7 +628,6 @@ interface GoalContainerCardProps {
   setAddingWorkingToContainer: (id: string | null) => void;
   newWorkingText: string;
   setNewWorkingText: (text: string) => void;
-  onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges") => void;
   readOnly?: boolean;
 }
 
@@ -615,7 +647,6 @@ function GoalContainerCard({
   setAddingWorkingToContainer,
   newWorkingText,
   setNewWorkingText,
-  onSubmitRequest,
   readOnly = false,
 }: GoalContainerCardProps) {
   const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);
@@ -874,18 +905,6 @@ function GoalContainerCard({
         )}
         {addWorkingControl}
       </div>
-
-      {/* Submission / review */}
-      {!readOnly && !isFutureWeek && (
-        <div className="mt-4 border-t border-white/10 pt-3 flex items-center justify-end">
-          <button
-            onClick={() => onSubmitRequest(container.discipline)}
-            className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Submit
-          </button>
-        </div>
-      )}
 
       {showFeedbackInline && (
         <div className="mt-4 border-t border-white/10 pt-3 flex items-center justify-end">

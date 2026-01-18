@@ -1,4 +1,4 @@
-import { useState, useEffect, useReducer, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useReducer, useRef } from 'react';
 import { Goal } from '../db/progress-tracker/types';
 import { getActiveGoals, getAppData } from '../db/progress-tracker/operations';
 import { getDisciplineDisplay } from '../utils/disciplines';
@@ -31,6 +31,7 @@ interface ArchiveWeekModalProps {
   focusDiscipline: "Spins" | "Jumps" | "Edges";
   onClose: () => void;
   onSuccess: () => void;
+  track?: "on-ice" | "off-ice";
 }
 
 interface GoalFeedbackState {
@@ -67,6 +68,7 @@ export default function ArchiveWeekModal({
   focusDiscipline,
   onClose,
   onSuccess,
+  track = "on-ice",
 }: ArchiveWeekModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [primaryGoals, setPrimaryGoals] = useState<Goal[]>([]);
@@ -74,7 +76,6 @@ export default function ArchiveWeekModal({
   const [goalRatings, dispatchGoalRatings] = useReducer(goalRatingsReducer, {});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [navHeight, setNavHeight] = useState(0);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Step 2 data - goal cards
@@ -101,10 +102,10 @@ export default function ArchiveWeekModal({
       try {
         const allGoals = await getActiveGoals();
         const primary = allGoals.filter(
-          g => g.discipline === focusDiscipline && g.type === 'primary'
+          g => g.discipline === focusDiscipline && g.type === 'primary' && (g.track || 'on-ice') === track
         );
         const working = allGoals.filter(
-          g => g.discipline === focusDiscipline && g.type === 'working'
+          g => g.discipline === focusDiscipline && g.type === 'working' && (g.track || 'on-ice') === track
         );
         setPrimaryGoals(primary);
         setWorkingGoals(working);
@@ -129,20 +130,6 @@ export default function ArchiveWeekModal({
     loadGoals();
   }, [focusDiscipline]);
 
-  // Measure navbar height so the modal can sit below it and remain fully visible.
-  useLayoutEffect(() => {
-    function updateNavHeight() {
-      const nav = document.querySelector('nav');
-      if (nav) {
-        setNavHeight(nav.getBoundingClientRect().height);
-      }
-    }
-    updateNavHeight();
-    window.addEventListener('resize', updateNavHeight);
-    return () => {
-      window.removeEventListener('resize', updateNavHeight);
-    };
-  }, []);
 
   // Keep modal scrolled to top on step change.
   useEffect(() => {
@@ -250,22 +237,8 @@ export default function ArchiveWeekModal({
 
   if (loading) {
     return (
-      <div
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto"
-        style={{
-          paddingTop: `calc(${navHeight}px + env(safe-area-inset-top, 0px) + 16px)`,
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-          paddingLeft: '16px',
-          paddingRight: '16px',
-        }}
-      >
-        <div
-          className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg"
-          style={{
-            marginTop: 0,
-            maxHeight: `calc(100vh - (${navHeight}px + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 40px))`,
-          }}
-        >
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg">
           <p>Loading goals...</p>
         </div>
       </div>
@@ -283,21 +256,12 @@ export default function ArchiveWeekModal({
   );
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto"
-      style={{
-        paddingTop: `calc(${navHeight}px + env(safe-area-inset-top, 0px) + 16px)`,
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-        paddingLeft: '16px',
-        paddingRight: '16px',
-      }}
-    >
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
       <div
         ref={modalRef}
-        className="bg-white rounded-lg p-6 max-w-3xl w-full overflow-y-auto shadow-xl"
+        className="bg-white rounded-lg p-6 max-w-3xl w-full overflow-y-auto shadow-xl my-auto"
         style={{
-          marginTop: 0,
-          maxHeight: `calc(100vh - (${navHeight}px + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 40px))`,
+          maxHeight: 'calc(100vh - 2rem)',
         }}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -324,7 +288,7 @@ export default function ArchiveWeekModal({
                         <div>
                           <p className="mb-1 text-xs uppercase text-gray-500">Primary Goal</p>
                           <p className="mb-2 font-medium">{container.primary.content}</p>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                               <label className="block text-sm text-gray-700 mb-1">
                                 Rating (1-5 stars) <span className="text-red-500">*</span>
@@ -357,7 +321,7 @@ export default function ArchiveWeekModal({
                               return (
                                 <div key={goal.id} className="border border-gray-100 rounded-md p-3">
                                   <p className="mb-2 font-medium">Step {idx + 1}: {goal.content}</p>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                       <label className="block text-sm text-gray-700 mb-1">
                                         Rating (1-5 stars) <span className="text-red-500">*</span>
@@ -399,7 +363,7 @@ export default function ArchiveWeekModal({
                     return (
                       <div key={goal.id} className="border border-gray-200 rounded-lg p-4">
                         <p className="mb-2 font-medium">{goal.content}</p>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm text-gray-700 mb-1">
                               Rating (1-5 stars) <span className="text-red-500">*</span>
