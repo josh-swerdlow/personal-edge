@@ -464,6 +464,7 @@ function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContai
     primaryGoalId: primaryGoal.id,
     workingGoalIds: workingGoals.map(g => g.id),
     createdAt: primaryGoal.createdAt,
+    archivedAt: primaryGoal.archivedAt,
     weekStartDate: primaryGoal.weekStartDate,
     track: primaryGoal.track || 'on-ice', // Default to on-ice for backward compatibility
   };
@@ -473,9 +474,10 @@ function buildGoalContainer(primaryGoal: Goal, workingGoals: Goal[]): GoalContai
 export async function getGoalContainersByDiscipline(
   discipline: "Spins" | "Jumps" | "Edges",
   weekStartDate?: string,
-  track?: "on-ice" | "off-ice"
+  track?: "on-ice" | "off-ice",
+  includeArchived?: boolean
 ): Promise<GoalContainer[]> {
-  logger.info(`[getGoalContainersByDiscipline] Loading containers for ${discipline}${weekStartDate ? ` (week: ${weekStartDate})` : ' (all weeks)'}`);
+  logger.info(`[getGoalContainersByDiscipline] Loading containers for ${discipline}${weekStartDate ? ` (week: ${weekStartDate})` : ' (all weeks)'}${includeArchived ? ' (including archived)' : ''}`);
 
   // Get all goals for this discipline, then filter in memory
   // This is more reliable than complex Dexie queries
@@ -486,9 +488,9 @@ export async function getGoalContainersByDiscipline(
 
   logger.info(`[getGoalContainersByDiscipline] Found ${allGoals.length} total goals for ${discipline}`);
 
-  // Filter to primary goals that are not archived
+  // Filter to primary goals (optionally include archived)
   let primaryGoals = allGoals.filter(g =>
-    g.type === 'primary' && !g.archivedAt
+    g.type === 'primary' && (includeArchived || !g.archivedAt)
   );
 
   // Filter by track if provided (treat undefined track as "on-ice" for backward compatibility)
@@ -542,9 +544,9 @@ export async function getGoalContainersByDiscipline(
       .equals(primaryGoal.id)
       .toArray();
 
-    // Filter to working goals that are not archived
+    // Filter to working goals (optionally include archived)
     const workingGoals = containerGoals.filter(g =>
-      g.type === 'working' && !g.archivedAt && g.containerId === primaryGoal.id
+      g.type === 'working' && (includeArchived || !g.archivedAt) && g.containerId === primaryGoal.id
     );
 
     logger.info(`[getGoalContainersByDiscipline] Built container for "${primaryGoal.content}" with ${workingGoals.length} working goals`);

@@ -12,6 +12,7 @@ import {
   canCreateContainer,
   canAddWorkingGoal,
   deleteGoal,
+  archiveGoal,
   getGoalFeedbackForContainer,
   upsertGoalFeedbackEntry
 } from '../db/progress-tracker/operations';
@@ -155,7 +156,8 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
         const discipline = disciplines[cyclePosition];
 
         // Load goal containers for this week (will be filtered by track in WeekCard)
-        const containers = await getGoalContainersByDiscipline(discipline, weekStartStr);
+        // Include archived goals so past weeks still show completed goals
+        const containers = await getGoalContainersByDiscipline(discipline, weekStartStr, undefined, true);
 
         past.push({
           weekStartDate: weekStartStr,
@@ -279,6 +281,30 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
     onGoalUpdate();
     } catch (error: any) {
       alert(error.message || 'Failed to add working goal');
+    }
+  }
+
+  async function handleArchiveStaleGoals(containers: GoalContainer[]) {
+    if (!confirm('Archive all goals from this past week? They will no longer count toward your goal limit.')) {
+      return;
+    }
+
+    try {
+      for (const container of containers) {
+        await archiveGoal(container.primaryGoalId);
+        for (const workingId of container.workingGoalIds) {
+          await archiveGoal(workingId);
+        }
+      }
+
+      await loadCurrentWeek();
+      if (showPast) {
+        await loadPastWeeks(true);
+      }
+      onGoalUpdate();
+    } catch (error) {
+      logger.error('Failed to archive stale goals:', error);
+      alert('Failed to archive goals. Please try again.');
     }
   }
 
@@ -428,6 +454,7 @@ export default function UnifiedWeekView({ onGoalUpdate }: UnifiedWeekViewProps) 
                   onCreateContainer={handleCreateContainer}
                   onAddWorkingGoal={handleAddWorkingGoal}
                   onSubmitRequest={handleSubmitRequest}
+                  onArchiveStale={handleArchiveStaleGoals}
                 />
               ))
             )}
@@ -455,6 +482,7 @@ interface WeekCardProps {
   onCreateContainer: (discipline: "Spins" | "Jumps" | "Edges", primaryContent: string, weekStartDate?: string, track?: "on-ice" | "off-ice") => void;
   onAddWorkingGoal: (containerId: string, content: string) => void;
   onSubmitRequest: (discipline: "Spins" | "Jumps" | "Edges", track?: "on-ice" | "off-ice") => void;
+  onArchiveStale?: (containers: GoalContainer[]) => void;
 }
 
 function WeekCard({
@@ -474,6 +502,7 @@ function WeekCard({
   onCreateContainer,
   onAddWorkingGoal,
   onSubmitRequest,
+  onArchiveStale,
 }: WeekCardProps) {
   const [addingContainer, setAddingContainer] = useState(false);
   const [newPrimaryText, setNewPrimaryText] = useState('');
@@ -608,6 +637,18 @@ function WeekCard({
           </button>
         </div>
       )}
+
+      {/* Archive button for past weeks with unarchived goals */}
+      {isPast && filteredContainers.some(c => !c.archivedAt) && onArchiveStale && (
+        <div className="mt-6 border-t border-white/10 pt-4 flex items-center justify-end">
+          <button
+            onClick={() => onArchiveStale(filteredContainers.filter(c => !c.archivedAt))}
+            className="px-4 py-2 text-sm rounded bg-amber-600 text-white hover:bg-amber-700 transition"
+          >
+            Archive
+          </button>
+        </div>
+      )}
     </LiquidGlassCard>
   );
 }
@@ -657,18 +698,19 @@ function GoalContainerCard({
 
   useEffect(() => {
     async function loadGoals() {
-      // Load primary goal
+      // Load primary goal (include archived for past week display)
       const primary = await progressTrackerDB.goals.get(container.primaryGoalId);
-      if (primary && !primary.archivedAt) {
+      if (primary) {
         setPrimaryGoal(primary);
       }
       // Load working goals - only get goals that are actually working goals (containerId !== id)
+      // Include archived working goals if container is archived (past week display)
       const allWorking = await Promise.all(
         container.workingGoalIds.map(id => progressTrackerDB.goals.get(id).then(g => g!))
       );
       const validWorking = allWorking.filter(g =>
         g &&
-        !g.archivedAt &&
+        (container.archivedAt || !g.archivedAt) && // Include archived if container is archived
         g.containerId &&
         g.containerId !== g.id && // Working goal: containerId !== id
         g.type === 'working' // Double check it's a working goal
@@ -913,7 +955,7 @@ function GoalContainerCard({
             onClick={() => setShowFeedbackModal(true)}
             className="px-3 py-1 text-sm rounded bg-white/20 text-white hover:bg-white/30"
           >
-            Edit Feedback
+            {feedbackEntries.length > 0 ? 'Edit Feedback' : 'Add Feedback'}
           </button>
         </div>
       )}
@@ -1048,6 +1090,7 @@ function GoalFeedbackModal({
   onClose,
   onSaved,
 }: GoalFeedbackModalProps) {
+  const hasExistingFeedback = Object.values(feedbackMap).some(f => f?.rating || f?.feedback);
   const [entries, setEntries] = useState<Record<string, { rating?: number; feedback: string }>>(() => {
     const initial: Record<string, { rating?: number; feedback: string }> = {};
     goals.forEach(goal => {
@@ -1116,9 +1159,11 @@ function GoalFeedbackModal({
       <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Edit Feedback</h2>
+            <h2 className="text-xl font-semibold text-gray-900">
+              {hasExistingFeedback ? 'Edit Feedback' : 'Add Feedback'}
+            </h2>
             <p className="text-sm text-gray-500">
-              Update the star rating and notes for each goal in this container.
+              {hasExistingFeedback ? 'Update' : 'Add'} the star rating and notes for each goal in this container.
             </p>
           </div>
           <button

@@ -29,6 +29,7 @@ export interface GoalContainer {
   primaryGoalId: string;
   workingGoalIds: string[];         // Max 2 items
   createdAt: number;                // Unix timestamp
+  archivedAt?: number;              // Unix timestamp - set when container is archived
   weekStartDate?: string;           // ISO date string for the week this container belongs to
   track?: GoalTrack;                 // Derived from primary goal, "on-ice" or "off-ice"
 }
