@@ -602,7 +602,18 @@ export async function createGoalContainer(
     track,
   };
 
-  await progressTrackerDB.goals.add(primaryGoal);
+  // Write primary goal to Neon (if available) or IndexedDB
+  const savedPrimaryGoal = await writeGoalToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await createGoalInNeon(primaryGoal);
+      } else {
+        await progressTrackerDB.goals.add(primaryGoal);
+        return primaryGoal;
+      }
+    },
+    primaryGoal.id
+  );
 
   // Create working goals
   const workingGoals: Goal[] = [];
@@ -618,12 +629,24 @@ export async function createGoalContainer(
         weekStartDate,
         track,
       };
-      await progressTrackerDB.goals.add(workingGoal);
-      workingGoals.push(workingGoal);
+
+      // Write working goal to Neon (if available) or IndexedDB
+      const savedWorkingGoal = await writeGoalToNeonAndSync(
+        async () => {
+          if (isNeonAvailable()) {
+            return await createGoalInNeon(workingGoal);
+          } else {
+            await progressTrackerDB.goals.add(workingGoal);
+            return workingGoal;
+          }
+        },
+        workingGoal.id
+      );
+      workingGoals.push(savedWorkingGoal);
     }
   }
 
-  return buildGoalContainer(primaryGoal, workingGoals);
+  return buildGoalContainer(savedPrimaryGoal, workingGoals);
 }
 
 // Add a working goal to an existing container
@@ -660,19 +683,40 @@ export async function addWorkingGoalToContainer(
     track: primaryGoal.track || 'on-ice', // Inherit track from primary goal
   };
 
-  await progressTrackerDB.transaction('rw', progressTrackerDB.goals, async () => {
-    await progressTrackerDB.goals.add(workingGoal);
-    const primaryGoal = await progressTrackerDB.goals.get(containerId);
-    if (primaryGoal) {
-      const existingIds = Array.isArray(primaryGoal.workingGoalIds) ? primaryGoal.workingGoalIds : [];
-      const updatedIds = [
-        ...existingIds.filter((goalId: string) => goalId !== workingGoal.id),
-        workingGoal.id,
-      ];
-      await progressTrackerDB.goals.update(containerId, { workingGoalIds: updatedIds, updatedAt: Date.now() });
-    }
-  });
-  return workingGoal;
+  // Write working goal to Neon (if available) or IndexedDB
+  const savedWorkingGoal = await writeGoalToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await createGoalInNeon(workingGoal);
+      } else {
+        await progressTrackerDB.goals.add(workingGoal);
+        return workingGoal;
+      }
+    },
+    workingGoal.id
+  );
+
+  // Update primary goal's workingGoalIds
+  const existingIds = Array.isArray(primaryGoal.workingGoalIds) ? primaryGoal.workingGoalIds : [];
+  const updatedIds = [
+    ...existingIds.filter((goalId: string) => goalId !== savedWorkingGoal.id),
+    savedWorkingGoal.id,
+  ];
+
+  await writeGoalToNeonAndSync(
+    async () => {
+      if (isNeonAvailable()) {
+        return await updateGoalInNeon(containerId, { workingGoalIds: updatedIds, updatedAt: Date.now() });
+      } else {
+        await progressTrackerDB.goals.update(containerId, { workingGoalIds: updatedIds, updatedAt: Date.now() });
+        const updated = await progressTrackerDB.goals.get(containerId);
+        return updated!;
+      }
+    },
+    containerId
+  );
+
+  return savedWorkingGoal;
 }
 
 // Remove a working goal from a container
