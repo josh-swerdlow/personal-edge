@@ -6,9 +6,11 @@ import { getPrioritizedCards, CardWithContext } from '../db/training-coach/searc
 import { DISCIPLINES, getDisciplineDisplay } from '../utils/disciplines';
 import { updateCard } from '../db/training-coach/operations';
 import { progressTrackerDB } from '../db/progress-tracker/db';
-import { Goal, GoalTrack } from '../db/progress-tracker/types';
+import { Goal, GoalTrack, GoalContainer } from '../db/progress-tracker/types';
 import { logger } from '../utils/logger';
 import { TrackTabs } from '../components/TrackTabs';
+import ArchiveWeekModal from '../components/ArchiveWeekModal';
+import ArchiveButton from '../components/ArchiveButton';
 
 export default function Home() {
 
@@ -16,6 +18,7 @@ export default function Home() {
     loading: progressLoading,
     currentFocus,
     containersByDiscipline,
+    refreshGoals,
   } = useProgressTracker();
 
   const [priorityCards, setPriorityCards] = useState<CardWithContext[]>([]);
@@ -25,6 +28,7 @@ export default function Home() {
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [touchEnd, setTouchEnd] = useState<number | null>(null);
   const [activeTrack, setActiveTrack] = useState<GoalTrack>('on-ice');
+  const [archiveModalDiscipline, setArchiveModalDiscipline] = useState<"Spins" | "Jumps" | "Edges" | null>(null);
 
   const loadPriorityCards = async () => {
     setLoadingCards(true);
@@ -228,9 +232,17 @@ export default function Home() {
                           key={discipline}
                           className={`flex flex-col ${index < orderedDisciplines.length - 1 ? 'border-r border-white/20 pr-4' : ''}`}
                         >
-                          <h3 className="text-lg font-medium text-white mb-3">
-                            {getDisciplineDisplay(discipline)}
-                          </h3>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-lg font-medium text-white">
+                              {getDisciplineDisplay(discipline)}
+                            </h3>
+                            {containers.length > 0 && (
+                              <ArchiveButton
+                                onClick={() => setArchiveModalDiscipline(discipline)}
+                                showText={true}
+                              />
+                            )}
+                          </div>
 
                           {/* Goal Containers (max 3) */}
                           {containers.length > 0 ? (
@@ -285,9 +297,17 @@ export default function Home() {
                               key={discipline}
                               className="w-full flex-shrink-0 px-2"
                             >
-                              <h3 className="text-lg font-medium text-white mb-3">
-                                {getDisciplineDisplay(discipline)}
-                              </h3>
+                              <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-lg font-medium text-white">
+                                  {getDisciplineDisplay(discipline)}
+                                </h3>
+                                {containers.length > 0 && (
+                                  <ArchiveButton
+                                    onClick={() => setArchiveModalDiscipline(discipline)}
+                                    showText={false}
+                                  />
+                                )}
+                              </div>
 
                               {/* Goal Containers (max 3) */}
                               {containers.length > 0 ? (
@@ -566,13 +586,26 @@ export default function Home() {
             </section>
           </>
         )}
+
+        {/* Archive Modal - Full Page Overlay */}
+        {archiveModalDiscipline && (
+          <ArchiveWeekModal
+            focusDiscipline={archiveModalDiscipline}
+            onClose={() => setArchiveModalDiscipline(null)}
+            onSuccess={async () => {
+              setArchiveModalDiscipline(null);
+              await refreshGoals();
+            }}
+            track={activeTrack}
+          />
+        )}
       </div>
     </div>
   );
 }
 
 // Component to display a single goal container
-function GoalContainerDisplay({ container }: { container: { id: string; primaryGoalId: string; workingGoalIds: string[] } }) {
+function GoalContainerDisplay({ container }: { container: GoalContainer }) {
   console.log(`[GoalContainerDisplay] FUNCTION CALLED for container ${container.id}`, container);
   logger.info(`[GoalContainerDisplay] Component mounted for container ${container.id}`, container);
   const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);

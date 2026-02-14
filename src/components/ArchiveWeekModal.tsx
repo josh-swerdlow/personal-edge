@@ -83,12 +83,24 @@ export default function ArchiveWeekModal({
   const [goalCards, setGoalCards] = useState<GoalCard[]>([{ goal: '', step1: '', step2: '' }]);
   const [weekDates, setWeekDates] = useState<UpcomingWeekDates | null>(null);
 
+  // Carry-over state
+  const [carryOverContainers, setCarryOverContainers] = useState<Set<string>>(new Set());
+  const [carriedOverContent, setCarriedOverContent] = useState<Map<string, {
+    primary: string;
+    working: string[];
+  }>>(new Map());
+
   function updateGoalCard(index: number, field: keyof GoalCard, value: string) {
     setGoalCards(prev => prev.map((card, idx) => (idx === index ? { ...card, [field]: value } : card)));
   }
 
   function addGoalCard() {
-    setGoalCards(prev => (prev.length >= 3 ? prev : [...prev, { goal: '', step1: '', step2: '' }]));
+    // Count total cards including carried-over ones - max 3 total
+    const totalCards = goalCards.length;
+    if (totalCards >= 3) {
+      return; // Already at max
+    }
+    setGoalCards(prev => [...prev, { goal: '', step1: '', step2: '' }]);
   }
 
   function removeGoalCard(index: number) {
@@ -118,6 +130,10 @@ export default function ArchiveWeekModal({
 
         setGoalCards([{ goal: '', step1: '', step2: '' }]);
 
+        // Reset carry-over state
+        setCarryOverContainers(new Set());
+        setCarriedOverContent(new Map());
+
         // Calculate week dates for step 2
         const appData = await getAppData();
         setWeekDates(computeUpcomingWeekDates(appData));
@@ -138,8 +154,62 @@ export default function ArchiveWeekModal({
     }
   }, [step]);
 
+  // Prevent body scrolling when modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, []);
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    function handleEscapeKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    }
+
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [onClose]);
+
   function updateGoalRating(goalId: string, rating: number | undefined, feedback: string) {
     dispatchGoalRatings({ type: 'update', goalId, rating, feedback });
+  }
+
+  function handleCarryOverToggle(
+    containerId: string,
+    container: { primary: Goal; working: Goal[] },
+    isCarryingOver: boolean
+  ) {
+    if (isCarryingOver) {
+      // Add to carry over set
+      setCarryOverContainers(prev => new Set(prev).add(containerId));
+      // Store original content
+      setCarriedOverContent(prev => {
+        const newMap = new Map(prev);
+        newMap.set(containerId, {
+          primary: container.primary.content,
+          working: container.working.map(w => w.content)
+        });
+        return newMap;
+      });
+    } else {
+      // Remove from carry over
+      setCarryOverContainers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(containerId);
+        return newSet;
+      });
+      setCarriedOverContent(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(containerId);
+        return newMap;
+      });
+    }
   }
 
   async function handleStep1Next() {
@@ -164,6 +234,30 @@ export default function ArchiveWeekModal({
       }
       alert(`Please complete all required fields: ${parts.join(', ')}.`);
       return;
+    }
+
+    // Pre-populate goal cards with carried over containers
+    const carriedOverCards: GoalCard[] = [];
+    for (const containerId of carryOverContainers) {
+      const content = carriedOverContent.get(containerId);
+      if (content) {
+        carriedOverCards.push({
+          goal: content.primary,        // Pre-filled, editable
+          step1: content.working[0] || '',  // Pre-filled, editable
+          step2: content.working[1] || '',  // Pre-filled, editable
+        });
+      }
+    }
+
+    // Set goal cards: carried over first, then empty card for new goals (max 3 total)
+    // Only add empty card if we have less than 3 carried-over cards
+    if (carriedOverCards.length >= 3) {
+      setGoalCards(carriedOverCards);
+    } else {
+      setGoalCards(carriedOverCards.length > 0
+        ? [...carriedOverCards, { goal: '', step1: '', step2: '' }]
+        : [{ goal: '', step1: '', step2: '' }]
+      );
     }
 
     setStep(2);
@@ -256,13 +350,33 @@ export default function ArchiveWeekModal({
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+    <div
+      className="fixed bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-hidden"
+      style={{
+        zIndex: 9999,
+        top: 'var(--deck-navbar-height)',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingTop: 'clamp(0.5rem, 2vw, 1rem)',
+        paddingLeft: 'clamp(0.5rem, 2vw, 1rem)',
+        paddingRight: 'clamp(0.5rem, 2vw, 1rem)',
+        paddingBottom: 'clamp(0.5rem, env(safe-area-inset-bottom) + 0.5rem, 1rem)',
+      }}
+      onClick={(e) => {
+        // Close on backdrop click
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         ref={modalRef}
-        className="bg-white rounded-lg p-6 max-w-3xl w-full overflow-y-auto shadow-xl my-auto"
+        className="bg-white rounded-lg p-6 max-w-3xl w-full overflow-y-auto shadow-xl"
         style={{
-          maxHeight: 'calc(100vh - 2rem)',
+          maxHeight: 'calc(100vh - var(--deck-navbar-height) - 2rem)',
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
           <h2 className="text-2xl font-bold">
@@ -283,8 +397,22 @@ export default function ArchiveWeekModal({
                 <div className="space-y-4">
                   {goalContainers.map(container => {
                     const primaryState = goalRatings[container.primary.id] ?? { rating: undefined, feedback: '' };
+                    const isCarryingOver = carryOverContainers.has(container.primary.id);
                     return (
                       <div key={container.primary.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                        {/* Carry Over Checkbox */}
+                        <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isCarryingOver}
+                              onChange={(e) => handleCarryOverToggle(container.primary.id, container, e.target.checked)}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-medium text-gray-700">Carry this goal forward</span>
+                          </label>
+                        </div>
+
                         <div>
                           <p className="mb-1 text-xs uppercase text-gray-500">Primary Goal</p>
                           <p className="mb-2 font-medium">{container.primary.content}</p>
@@ -426,19 +554,28 @@ export default function ArchiveWeekModal({
               </div>
 
               <div className="space-y-4">
-                {goalCards.map((card, index) => (
-                  <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div className="font-medium">Goal {index + 1}</div>
-                      <button
-                        type="button"
-                        onClick={() => removeGoalCard(index)}
-                        className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-300"
-                        disabled={goalCards.length === 1}
-                      >
-                        Remove
-                      </button>
-                    </div>
+                {goalCards.map((card, index) => {
+                  const isCarriedOver = index < carryOverContainers.size;
+                  return (
+                    <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium">Goal {index + 1}</div>
+                          {isCarriedOver && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded font-medium">
+                              Carried Over
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeGoalCard(index)}
+                          className="text-sm text-red-600 hover:text-red-700 disabled:text-gray-300"
+                          disabled={goalCards.length === 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     <div className="space-y-2">
                       <label className="block text-sm font-medium text-gray-700">
                         Goal (primary) — target week {weekDates ? new Date(weekDates.week3).toLocaleDateString() : ''} <span className="text-red-500">*</span>
@@ -479,7 +616,8 @@ export default function ArchiveWeekModal({
                       />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {goalCards.length < 3 && (
