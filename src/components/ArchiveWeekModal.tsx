@@ -90,6 +90,9 @@ export default function ArchiveWeekModal({
     working: string[];
   }>>(new Map());
 
+  // Skip state - tracks which goals/steps are skipped
+  const [skippedGoals, setSkippedGoals] = useState<Set<string>>(new Set());
+
   function updateGoalCard(index: number, field: keyof GoalCard, value: string) {
     setGoalCards(prev => prev.map((card, idx) => (idx === index ? { ...card, [field]: value } : card)));
   }
@@ -134,6 +137,9 @@ export default function ArchiveWeekModal({
         setCarryOverContainers(new Set());
         setCarriedOverContent(new Map());
 
+        // Reset skip state
+        setSkippedGoals(new Set());
+
         // Calculate week dates for step 2
         const appData = await getAppData();
         setWeekDates(computeUpcomingWeekDates(appData));
@@ -144,7 +150,7 @@ export default function ArchiveWeekModal({
       }
     }
     loadGoals();
-  }, [focusDiscipline]);
+  }, [focusDiscipline, track]);
 
 
   // Keep modal scrolled to top on step change.
@@ -212,14 +218,45 @@ export default function ArchiveWeekModal({
     }
   }
 
+  function handleSkipToggle(
+    goalId: string,
+    container: { primary: Goal; working: Goal[] } | null,
+    isSkipping: boolean
+  ) {
+    setSkippedGoals(prev => {
+      const newSet = new Set(prev);
+
+      if (isSkipping) {
+        // Add goal to skipped set
+        newSet.add(goalId);
+
+        // If this is a primary goal (container), also skip all its working steps by default
+        if (container && goalId === container.primary.id) {
+          container.working.forEach(workingGoal => {
+            newSet.add(workingGoal.id);
+          });
+        }
+      } else {
+        // Remove goal from skipped set
+        newSet.delete(goalId);
+        // Note: When unchecking primary skip, we don't automatically uncheck step skips
+        // User can manually uncheck individual step skips if needed
+      }
+
+      return newSet;
+    });
+  }
+
   async function handleStep1Next() {
-    // Validate that all goals have ratings (1-5)
+    // Validate that all non-skipped goals have ratings (1-5) and feedback
     const allGoalIds = [...primaryGoals, ...workingGoals].map(goal => goal.id);
-    const missingRatings = allGoalIds.filter(goalId => {
+    const nonSkippedGoalIds = allGoalIds.filter(goalId => !skippedGoals.has(goalId));
+
+    const missingRatings = nonSkippedGoalIds.filter(goalId => {
       const rating = goalRatings[goalId]?.rating;
       return rating === undefined || rating < 1 || rating > 5;
     });
-    const missingFeedback = allGoalIds.filter(goalId => {
+    const missingFeedback = nonSkippedGoalIds.filter(goalId => {
       const feedback = goalRatings[goalId]?.feedback?.trim();
       return !feedback;
     });
@@ -295,20 +332,34 @@ export default function ArchiveWeekModal({
     const goalRatingInputs: GoalRatingInput[] = [];
 
     for (const goal of goalsToArchive) {
+      const isSkipped = skippedGoals.has(goal.id);
       const entry = goalRatings[goal.id];
-      if (!entry || entry.rating === undefined) {
-        alert('Please provide ratings (1-5 stars) for all goals before archiving.');
-        return;
+
+      if (!isSkipped) {
+        // Non-skipped goals must have rating and feedback
+        if (!entry || entry.rating === undefined) {
+          alert('Please provide ratings (1-5 stars) for all non-skipped goals before archiving.');
+          return;
+        }
+        if (!entry.feedback || entry.feedback.trim() === '') {
+          alert('Please provide feedback for all non-skipped goals before archiving.');
+          return;
+        }
+        goalRatingInputs.push({
+          goalId: goal.id,
+          rating: entry.rating,
+          feedback: entry.feedback.trim(),
+          skipped: false,
+        });
+      } else {
+        // Skipped goals - no rating/feedback required
+        goalRatingInputs.push({
+          goalId: goal.id,
+          rating: 0, // Placeholder, won't be used
+          feedback: '',
+          skipped: true,
+        });
       }
-      if (!entry.feedback || entry.feedback.trim() === '') {
-        alert('Please provide feedback for all goals before archiving.');
-        return;
-      }
-      goalRatingInputs.push({
-        goalId: goal.id,
-        rating: entry.rating,
-        feedback: entry.feedback.trim(),
-      });
     }
 
     setSubmitting(true);
@@ -317,6 +368,7 @@ export default function ArchiveWeekModal({
         focusDiscipline,
         goalRatings: goalRatingInputs,
         plannedGoals,
+        track,
       });
       onSuccess();
       onClose();
@@ -400,7 +452,7 @@ export default function ArchiveWeekModal({
                     const isCarryingOver = carryOverContainers.has(container.primary.id);
                     return (
                       <div key={container.primary.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
-                        {/* Carry Over Checkbox */}
+                        {/* Carry Over and Skip Checkboxes */}
                         <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -411,34 +463,47 @@ export default function ArchiveWeekModal({
                             />
                             <span className="text-sm font-medium text-gray-700">Carry this goal forward</span>
                           </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={skippedGoals.has(container.primary.id)}
+                              onChange={(e) => handleSkipToggle(container.primary.id, container, e.target.checked)}
+                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                            />
+                            <span className="text-sm font-medium text-gray-700">Skip</span>
+                          </label>
                         </div>
 
                         <div>
                           <p className="mb-1 text-xs uppercase text-gray-500">Primary Goal</p>
                           <p className="mb-2 font-medium">{container.primary.content}</p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm text-gray-700 mb-1">
-                                Rating (1-5 stars) <span className="text-red-500">*</span>
-                              </label>
-                              <StarRating
-                                rating={primaryState.rating}
-                                onRatingChange={(rating) => updateGoalRating(container.primary.id, rating, primaryState.feedback)}
-                              />
+                          {skippedGoals.has(container.primary.id) ? (
+                            <p className="text-sm text-gray-500 italic">Skipped - no feedback required</p>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm text-gray-700 mb-1">
+                                  Rating (1-5 stars) <span className="text-red-500">*</span>
+                                </label>
+                                <StarRating
+                                  rating={primaryState.rating}
+                                  onRatingChange={(rating) => updateGoalRating(container.primary.id, rating, primaryState.feedback)}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm text-gray-700 mb-1">
+                                  Feedback <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                  value={primaryState.feedback}
+                                  onChange={(e) => updateGoalRating(container.primary.id, primaryState.rating, e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
+                                  rows={2}
+                                  placeholder="How did it go?"
+                                />
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-sm text-gray-700 mb-1">
-                                Feedback <span className="text-red-500">*</span>
-                              </label>
-                              <textarea
-                                value={primaryState.feedback}
-                                onChange={(e) => updateGoalRating(container.primary.id, primaryState.rating, e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
-                                rows={2}
-                                placeholder="How did it go?"
-                              />
-                            </div>
-                          </div>
+                          )}
                         </div>
 
                         {container.working.length > 0 && (
@@ -446,32 +511,48 @@ export default function ArchiveWeekModal({
                             <p className="text-xs uppercase text-gray-500">Working Steps</p>
                             {container.working.map((goal, idx) => {
                               const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
+                              const isStepSkipped = skippedGoals.has(goal.id);
                               return (
                                 <div key={goal.id} className="border border-gray-100 rounded-md p-3">
-                                  <p className="mb-2 font-medium">Step {idx + 1}: {goal.content}</p>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                      <label className="block text-sm text-gray-700 mb-1">
-                                        Rating (1-5 stars) <span className="text-red-500">*</span>
-                                      </label>
-                                      <StarRating
-                                        rating={goalState.rating}
-                                        onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="font-medium">Step {idx + 1}: {goal.content}</p>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={isStepSkipped}
+                                        onChange={(e) => handleSkipToggle(goal.id, null, e.target.checked)}
+                                        className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
                                       />
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm text-gray-700 mb-1">
-                                        Feedback <span className="text-red-500">*</span>
-                                      </label>
-                                      <textarea
-                                        value={goalState.feedback}
-                                        onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
-                                        rows={2}
-                                        placeholder="How did it go?"
-                                      />
-                                    </div>
+                                      <span className="text-xs font-medium text-gray-700">Skip</span>
+                                    </label>
                                   </div>
+                                  {isStepSkipped ? (
+                                    <p className="text-sm text-gray-500 italic">Skipped - no feedback required</p>
+                                  ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="block text-sm text-gray-700 mb-1">
+                                          Rating (1-5 stars) <span className="text-red-500">*</span>
+                                        </label>
+                                        <StarRating
+                                          rating={goalState.rating}
+                                          onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm text-gray-700 mb-1">
+                                          Feedback <span className="text-red-500">*</span>
+                                        </label>
+                                        <textarea
+                                          value={goalState.feedback}
+                                          onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
+                                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
+                                          rows={2}
+                                          placeholder="How did it go?"
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -488,32 +569,48 @@ export default function ArchiveWeekModal({
                   <h4 className="font-medium">Additional Working Goals</h4>
                   {unlinkedWorkingGoals.map(goal => {
                     const goalState = goalRatings[goal.id] ?? { rating: undefined, feedback: '' };
+                    const isGoalSkipped = skippedGoals.has(goal.id);
                     return (
                       <div key={goal.id} className="border border-gray-200 rounded-lg p-4">
-                        <p className="mb-2 font-medium">{goal.content}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm text-gray-700 mb-1">
-                              Rating (1-5 stars) <span className="text-red-500">*</span>
-                            </label>
-                            <StarRating
-                              rating={goalState.rating}
-                              onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                        <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200">
+                          <p className="font-medium">{goal.content}</p>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isGoalSkipped}
+                              onChange={(e) => handleSkipToggle(goal.id, null, e.target.checked)}
+                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
                             />
-                          </div>
-                          <div>
-                            <label className="block text-sm text-gray-700 mb-1">
-                              Feedback <span className="text-red-500">*</span>
-                            </label>
-                            <textarea
-                              value={goalState.feedback}
-                              onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
-                              rows={2}
-                              placeholder="How did it go?"
-                            />
-                          </div>
+                            <span className="text-sm font-medium text-gray-700">Skip</span>
+                          </label>
                         </div>
+                        {isGoalSkipped ? (
+                          <p className="text-sm text-gray-500 italic">Skipped - no feedback required</p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-1">
+                                Rating (1-5 stars) <span className="text-red-500">*</span>
+                              </label>
+                              <StarRating
+                                rating={goalState.rating}
+                                onRatingChange={(rating) => updateGoalRating(goal.id, rating, goalState.feedback)}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-1">
+                                Feedback <span className="text-red-500">*</span>
+                              </label>
+                              <textarea
+                                value={goalState.feedback}
+                                onChange={(e) => updateGoalRating(goal.id, goalState.rating, e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
+                                rows={2}
+                                placeholder="How did it go?"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

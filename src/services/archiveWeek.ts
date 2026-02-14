@@ -13,6 +13,7 @@ export interface GoalRatingInput {
   goalId: string;
   rating: number;
   feedback: string;
+  skipped?: boolean;
 }
 
 export interface PlannedGoalsInput {
@@ -51,12 +52,14 @@ export interface ArchiveAndPlanPayload {
   focusDiscipline: "Spins" | "Jumps" | "Edges";
   goalRatings: GoalRatingInput[];
   plannedGoals: PlannedGoalsInput;
+  track?: "on-ice" | "off-ice";
 }
 
 export async function archiveAndPlanWeek({
   focusDiscipline,
   goalRatings,
   plannedGoals,
+  track = "on-ice",
 }: ArchiveAndPlanPayload): Promise<void> {
   const appData = await getAppData();
   const weekDates = computeUpcomingWeekDates(appData);
@@ -77,9 +80,9 @@ export async function archiveAndPlanWeek({
       containerId: sourceGoal.containerId ?? sourceGoal.id,
       discipline: sourceGoal.discipline,
       weekStartDate: archivedWeekStart,
-      rating: goal.rating,
-      feedback: goal.feedback,
-      completed: true,
+      rating: goal.skipped ? undefined : goal.rating,
+      feedback: goal.skipped ? undefined : goal.feedback,
+      completed: !goal.skipped,
     });
   }));
 
@@ -107,6 +110,7 @@ export async function archiveAndPlanWeek({
       type: 'primary',
       content: primaryContent,
       weekStartDate: week3StartStr,
+      track,
     });
 
     // Ensure primary goal references its own container
@@ -119,6 +123,7 @@ export async function archiveAndPlanWeek({
       content: step1Content,
       weekStartDate: nextWeekStartStr,
       containerId: primaryGoal.id,
+      track,
     });
 
     await createGoal({
@@ -127,6 +132,7 @@ export async function archiveAndPlanWeek({
       content: step2Content,
       weekStartDate: week2StartStr,
       containerId: primaryGoal.id,
+      track,
     });
   }
 }
